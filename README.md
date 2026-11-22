@@ -17,8 +17,8 @@ Said plainly, because a tool that reuses results has to earn trust:
 |---|---|
 | Skip: the key of a unit from the files on disk, the run ledger, receipts, exit codes | here, tested |
 | Skip: audits (random, forced, the defense round), revoking a source | here, tested (pure functions) |
-| Skip: `aib-skipstop` for cargo workspaces (cargo-nextest as the runner) | **observe mode only**: every unit still runs for real; the ledger records which earlier run it would have reused and whether the result came out the same |
-| Skip: really not running a unit | not yet. It is switched on only after the observe ledger shows no disagreement |
+| Skip: `aib-skipstop` for cargo workspaces (cargo-nextest as the runner) | here. **Observe mode is the default**: every unit runs for real and the ledger records which earlier run it would have reused and whether the result came out the same |
+| Skip: really not running a unit (`--mode real`) | here, behind the flag, with random and forced audits and a weekly defense round. It becomes the default only after the observe ledger has shown no disagreement over a trial period |
 | Stop: the generic precheck frame | not yet |
 | The time-saved events and their sum (today / week / month / year / all) | here, tested. Each run writes its units' times and, in observe mode, the reuses it would have made; `aib-skipstop saved` prints the sum |
 | Other languages than Rust | not yet |
@@ -49,8 +49,28 @@ with uncommitted changes is not taken as a source.
 aib-skipstop saved --utc-offset 480      # the five boxes, days on a UTC+08:00 clock; --json for a program
 ```
 
-While only observe mode exists every box is 0 and the predictions are counted beside: a unit that
-ran anyway saved nothing.
+In observe mode every box stays 0 and the predictions are counted beside: a unit that ran anyway
+saved nothing.
+
+### Real mode
+
+```sh
+AIB_SEAT=me aib-skipstop --mode real --why     # or AIB_SKIPSTOP_MODE=real
+AIB_SEAT=me aib-skipstop --mode real --fresh   # run everything this time, whatever the ledger says
+```
+
+A unit is **not run** only when all of this holds: its key could be worked out; an earlier run of
+that same key passed, ran to its end on a tree without uncommitted changes, and was never revoked;
+no audit picked the unit this time. Otherwise it runs:
+
+- the first real-mode run, and one run a week after, is the **defense round**: everything runs.
+  An input a unit never listed changes no key, so only running everything finds it;
+- **audits**: one unit in five at random for the first two weeks, one in ten after; and always
+  after ten reuses in a row or seven days without a real run;
+- a real run that disagrees with the source it would have been reused from **revokes** that
+  source for good, and the run is not green.
+
+A failure is never a source: a red unit runs again until it is green.
 
 The ledger goes under the AIB state root (`--state <dir>`, else `EZ2_AIB_STATE_ROOT`, else
 `EZ2_AIB_HOME`, else `~/.ez2-aib`). `AIB_SEAT` names who ran it; inside AIB the seat sets it.
@@ -85,7 +105,7 @@ cargo run --release -p skipstop-knife -- run       # all of them, about a minute
 - **Skip(影子續跑)**:輸入沒變的測試單位不重跑,沿用上次真跑的結果,並說得出沿用自哪一次。
 - **Stop(預檢省時)**:一定會失敗的工作,在花大錢之前先擋下。
 
-**現況(0.1.0)要講清楚**:目前只有「觀察模式」——每個單位都還是真跑,只在帳上記下「這次本來可以沿用哪一次、結果是否相同」。真的不跑(真沿用)要等觀察帳顯示沒有不一致才會打開;Stop 的通用框架、Rust 以外的語言都還沒做。
+**現況(0.1.0)要講清楚**:預設是「觀察模式」——每個單位都真跑,只在帳上記下「這次本來可以沿用哪一次、結果是否相同」。真沿用已經做好,要加 `--mode real` 才會啟用(有隨機與強制抽查、每週一次全跑的防守輪、`--fresh` 強制全跑);等觀察帳在試用期內沒有不一致,才會改成預設。Stop 的通用框架、Rust 以外的語言都還沒做。
 
 不會變的規矩:量不到就真跑;沿用的通過蓋不掉這次真跑出來的失敗;觀察模式的省時不進任何合計;已確認與預估永不相加;讀不懂的照實數出來,不猜。
 

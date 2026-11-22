@@ -32,6 +32,10 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           cargo --version
+      # the end-to-end test of real mode drives cargo-nextest (without it the test fails, on purpose)
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: format
         if: runner.os == 'Linux'
         shell: bash
