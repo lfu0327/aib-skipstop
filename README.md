@@ -64,6 +64,7 @@ aib-skipstop --mode real --why     # this run only
 aib-skipstop --mode real --fresh   # run everything this time, whatever the ledger says
 aib-skipstop mode real             # from now on, for this state folder; `mode observe` turns it back
 aib-skipstop mode                  # which mode, and who said so
+aib-skipstop --mode real --plan    # what a run would do with each unit; runs nothing, writes nothing
 ```
 
 A unit is **not run** only when all of this holds: its key could be worked out; an earlier run of
