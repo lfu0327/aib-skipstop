@@ -465,9 +465,15 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
 /// program, and how many lines were not a JSON object (a file, a folder or a folder entry that
 /// is there and cannot be read counts one; a folder that is not there is a program with no events).
 pub fn read_all(root: &Path, progs: &[&str]) -> (Vec<Value>, u64) {
+    let dirs: Vec<std::path::PathBuf> = progs.iter().map(|p| events::dir(root, p)).collect();
+    read_dirs(&dirs)
+}
+
+/// [`read_all`] over events folders named outright, in the order given.
+pub fn read_dirs(dirs: &[std::path::PathBuf]) -> (Vec<Value>, u64) {
     let (mut evs, mut bad) = (Vec::new(), 0u64);
-    for prog in progs {
-        let rd = match std::fs::read_dir(events::dir(root, prog)) {
+    for dir in dirs {
+        let rd = match std::fs::read_dir(dir) {
             Ok(rd) => rd,
             // a program that has written nothing yet has no folder: that is empty, not unread
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,

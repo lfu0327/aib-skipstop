@@ -149,6 +149,8 @@ struct Row {
     /// the source line as a verdict, to check this real run against (1ced7 engine link)
     source: Option<Verdict>,
     failed: Vec<String>,
+    /// the unit's own time in the source run, when its line has one
+    source_ms: Option<u64>,
     audit: Option<Audit>,
     result: Outcome,
     ran: u32,
@@ -253,6 +255,7 @@ fn run(a: &Args) -> Result<Exit, String> {
             at: skipstop_ledger::envelope::rfc3339_ms(at),
         });
         let source_result = src.map(|(_, u, _)| u.result);
+        let source_ms = src.and_then(|(_, u, _)| u.dur_ms);
         let source = src.map(|(st, u, _)| Verdict {
             outcome: audit_outcome(u.result),
             tests_ran: u.tests_ran,
@@ -267,6 +270,7 @@ fn run(a: &Args) -> Result<Exit, String> {
             would,
             source_result,
             source,
+            source_ms,
             failed: Vec::new(),
             audit: None,
             result: Outcome::None,
@@ -426,6 +430,38 @@ fn run(a: &Args) -> Result<Exit, String> {
         w.unit(now_ms(), &u)?;
     }
     w.end(now_ms(), true)?;
+
+    // the events book beside the ledger: each unit's time, and what observe mode would have saved
+    let at = now_ms();
+    let ctx = skipstop_ledger::events::Ctx {
+        host: None,
+        seat: Some(seat.clone()).filter(|s| skipstop_ledger::events::seat_code(s)),
+        cards: Vec::new(),
+        status_item: None,
+    };
+    let ran: Vec<skipstop_cargo::run_events::Ran<'_>> = rows
+        .iter()
+        .map(|r| skipstop_cargo::run_events::Ran {
+            unit: &r.unit,
+            ms: r.ms,
+            tests: r.ran,
+            outcome: r.result.word(),
+            would: r.would.as_ref().map(|w| skipstop_cargo::run_events::Would {
+                from: &w.from,
+                source_ms: r.source_ms,
+                agreed: r.source_result == Some(r.result)
+                    && !r.audit.as_ref().is_some_and(|a| a.revoke),
+            }),
+        })
+        .collect();
+    let events_dir = state.join("events");
+    for ev in skipstop_cargo::run_events::observe(&ctx, &plan.host, &head, &ran, at) {
+        // for people to read, never a gate: a write that fails is said and changes nothing
+        if let Err(e) = skipstop_ledger::events::append_in(&events_dir, &ev, at) {
+            eprintln!("aib-skipstop: event not written: {e}");
+            break;
+        }
+    }
 
     // what it says
     let would = rows.iter().filter(|r| r.would.is_some()).count();
