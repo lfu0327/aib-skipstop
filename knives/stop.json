@@ -1,0 +1,314 @@
+{
+ "knives": [
+  {
+   "id": "stop-ST1",
+   "why": "a finding is read as a pass: the check never stops anything",
+   "file": "crates/skipstop-stop/src/lib.rs",
+   "old": "        Ended::Code(code) if c.stop_codes.contains(code) => Says::Finding,",
+   "new": "        Ended::Code(code) if c.stop_codes.contains(code) => Says::Pass,",
+   "test": "a_check_passes_finds_or_is_broken_and_broken_is_neither",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST2",
+   "why": "a check whose tool failed (a code that is neither 0 nor a stop code) reads as a pass",
+   "file": "crates/skipstop-stop/src/lib.rs",
+   "old": "        Ended::Code(0) => Says::Pass,",
+   "new": "        Ended::Code(0) | Ended::Code(128) => Says::Pass,",
+   "test": "a_check_passes_finds_or_is_broken_and_broken_is_neither",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST3",
+   "why": "a broken check stops the command: one bad check blocks all work",
+   "file": "crates/skipstop-stop/src/lib.rs",
+   "old": "            (Says::Broken(why), _) => v.broken.push((c.id.clone(), why.clone())),",
+   "new": "            (Says::Broken(why), _) => v.stops.push(format!(\"{} {why}\", c.id)),",
+   "test": "only_a_reject_finding_stops_and_a_broken_check_stops_nothing",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST4",
+   "why": "a warning stops the command: a guess blocks work",
+   "file": "crates/skipstop-stop/src/lib.rs",
+   "old": "            (Says::Finding, Kind::Warn) => v.warns.push(c.id.clone()),",
+   "new": "            (Says::Finding, Kind::Warn) => v.stops.push(c.id.clone()),",
+   "test": "only_a_reject_finding_stops_and_a_broken_check_stops_nothing",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST5",
+   "why": "a key nobody knows in a check is let through (a typo turns the check into another one)",
+   "file": "crates/skipstop-stop/src/lib.rs",
+   "old": "        if let Some(k) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {",
+   "new": "        if let Some(k) = o.keys().find(|k| !KEYS.contains(&k.as_str()) && k.is_empty()) {",
+   "test": "a_checks_file_is_read_whole_or_not_at_all",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST6",
+   "why": "0 is taken as a stop code: the check stops every time it works",
+   "file": "crates/skipstop-stop/src/lib.rs",
+   "old": "                if codes.is_empty() || codes.len() != a.len() || codes.contains(&0) {",
+   "new": "                if codes.is_empty() || codes.len() != a.len() {",
+   "test": "a_checks_file_is_read_whole_or_not_at_all",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST7",
+   "why": "failed runs count towards what a stop saves",
+   "file": "crates/skipstop-stop/src/lib.rs",
+   "old": "        .filter(|v| v[\"kind\"] == \"unit_time\" && v[\"unit\"] == unit && v[\"outcome\"] == \"pass\")",
+   "new": "        .filter(|v| v[\"kind\"] == \"unit_time\" && v[\"unit\"] == unit)",
+   "test": "what_a_stop_saves_is_written_down_or_measured_and_never_made_up",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST8",
+   "why": "an observe-mode stop is recorded as a real one and counted in the total",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "        confirmed: true,\n        basis: &basis,\n        real,",
+   "new": "        confirmed: true,\n        basis: &basis,\n        real: real || true,",
+   "test": "one_stopped_command_is_one_saving_the_largest_named_and_never_the_sum",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST9",
+   "why": "real mode says stop and runs the command all the same",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "    if v.stop() && real {",
+   "new": "    if v.stop() && real && false {",
+   "test": "a_reject_finding_stops_the_command_in_real_mode_and_only_there",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "stop_mode"
+   ]
+  },
+  {
+   "id": "stop-ST10",
+   "why": "observe mode stops the command",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "    if v.stop() && real {",
+   "new": "    if v.stop() {",
+   "test": "a_reject_finding_stops_the_command_in_real_mode_and_only_there",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "stop_mode"
+   ]
+  },
+  {
+   "id": "stop-ST11",
+   "why": "a stop that --no-stop proved wrong stays in the total",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "        if code == Some(0) {",
+   "new": "        if code == Some(0) && false {",
+   "test": "a_reject_finding_stops_the_command_in_real_mode_and_only_there",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "stop_mode"
+   ]
+  },
+  {
+   "id": "stop-ST12",
+   "why": "a named checks file that is not there is read as no checks",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "        Err(e) if e.kind() == std::io::ErrorKind::NotFound && a.config.is_none() => {",
+   "new": "        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {",
+   "test": "no_checks_file_checks_nothing_and_a_named_or_bad_one_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "stop_mode"
+   ]
+  },
+  {
+   "id": "stop-ST13",
+   "why": "a stop on another commit is taken back too",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "            && str_of(o, \"head\") == Some(head)",
+   "new": "            && str_of(o, \"head\").is_some()",
+   "test": "a_stop_is_taken_back_once_and_only_for_its_command_on_its_commit",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST14",
+   "why": "a check is waited for past its time limit",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "            Ok(None) if start.elapsed() >= limit => {",
+   "new": "            Ok(None) if start.elapsed() >= limit * 60 => {",
+   "test": "a_check_command_is_run_with_its_time_limit",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST15",
+   "why": "two checks stopping one command count its time twice (the sum, not the largest)",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "        .max_by_key(|(ms, _, _)| *ms);",
+   "new": "        .min_by_key(|(ms, _, _)| *ms);",
+   "test": "one_stopped_command_is_one_saving_the_largest_named_and_never_the_sum",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST16",
+   "why": "another command passing on the commit takes this command's stop back",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "            && str_of(o, \"unit\") == Some(command)",
+   "new": "            && str_of(o, \"unit\").is_some_and(|_| !command.is_empty())",
+   "test": "a_stop_is_taken_back_once_and_only_for_its_command_on_its_commit",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST17",
+   "why": "a check past its time is left running with what it started",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "        .args([\"-9\", &format!(\"-{pid}\")])",
+   "new": "        .args([\"-0\", &format!(\"-{pid}\")])",
+   "test": "a_check_command_is_run_with_its_time_limit",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST18",
+   "why": "started in a folder inside the repo, the repo's checks are not found: everything is let through",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "    let dir = env.root.clone().unwrap_or_else(|| PathBuf::from(\".\"));",
+   "new": "    let dir = env.root.clone().map_or_else(|| PathBuf::from(\".\"), |_| PathBuf::from(\".\"));",
+   "test": "a_reject_finding_stops_the_command_in_real_mode_and_only_there",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "stop_mode"
+   ]
+  },
+  {
+   "id": "stop-ST19",
+   "why": "the same words in another folder are taken as the same command",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "    serde_json::json!({\"tree\": root, \"in\": prefix, \"cmd\": cmd}).to_string()",
+   "new": "    serde_json::json!({\"tree\": root, \"in\": prefix.len().min(0), \"cmd\": cmd}).to_string()",
+   "test": "a_stop_is_taken_back_once_and_only_for_its_command_on_its_commit",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  },
+  {
+   "id": "stop-ST20",
+   "why": "the same commit in another work tree is taken as the same command",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "    serde_json::json!({\"tree\": root, \"in\": prefix, \"cmd\": cmd}).to_string()",
+   "new": "    serde_json::json!({\"tree\": root.len().min(0), \"in\": prefix, \"cmd\": cmd}).to_string()",
+   "test": "a_stop_is_taken_back_once_and_only_for_its_command_on_its_commit",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked"
+   ]
+  }
+ ]
+}

@@ -473,10 +473,9 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
     out
 }
 
-/// The real savings that stand on `unit` reused from the run `from` and that no
-/// `time_saved_wrong` has taken back yet: (id, saved_ms), in the order written. What a
-/// program writes its `time_saved_wrong` events from when that source is revoked.
-pub fn standing_on(evs: &[Value], unit: &str, from: &str) -> Vec<(String, u64)> {
+/// The real savings `keep` picks that no `time_saved_wrong` has taken back yet: (id, saved_ms),
+/// in the order written. An observe-mode prediction saved nothing, so it is never among them.
+fn standing(evs: &[Value], keep: impl Fn(&Map<String, Value>) -> bool) -> Vec<(String, u64)> {
     let taken: std::collections::BTreeSet<&str> = evs
         .iter()
         .filter(|v| v["kind"] == KIND_WRONG)
@@ -485,11 +484,33 @@ pub fn standing_on(evs: &[Value], unit: &str, from: &str) -> Vec<(String, u64)> 
     evs.iter()
         .filter_map(Value::as_object)
         .filter(|o| str_of(o, "kind") == Some(KIND_SAVED) && str_of(o, "mode") == Some("real"))
-        .filter(|o| str_of(o, "unit") == Some(unit) && str_of(o, "from") == Some(from))
+        .filter(|o| keep(o))
         .filter_map(|o| Some((str_of(o, "id")?, o.get("saved_ms")?.as_u64()?)))
         .filter(|(id, _)| !taken.contains(id))
         .map(|(id, ms)| (id.to_string(), ms))
         .collect()
+}
+
+/// The real savings that stand on `unit` reused from the run `from` and are not taken back
+/// yet. What a program writes its `time_saved_wrong` events from when that source is revoked.
+pub fn standing_on(evs: &[Value], unit: &str, from: &str) -> Vec<(String, u64)> {
+    standing(evs, |o| {
+        str_of(o, "unit") == Some(unit) && str_of(o, "from") == Some(from)
+    })
+}
+
+/// The real stops (`system = precheck`, `verdict = reject`) of the command `command` recorded at
+/// `head` that are not taken back yet. What is taken back when that very command is run all
+/// the same on that commit and passes: another command passing says nothing about this one.
+/// A head that is not known matches nothing.
+pub fn standing_stops(evs: &[Value], head: &str, command: &str) -> Vec<(String, u64)> {
+    standing(evs, |o| {
+        str_of(o, "system") == Some("precheck")
+            && str_of(o, "verdict") == Some("reject")
+            && !head.is_empty()
+            && str_of(o, "head") == Some(head)
+            && str_of(o, "unit") == Some(command)
+    })
 }
 
 /// Every event object of `progs`' month files under `root`, oldest file first within a

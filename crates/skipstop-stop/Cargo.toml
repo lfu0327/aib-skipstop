@@ -1,0 +1,19 @@
+[package]
+name = "skipstop-stop"
+description = "The stop half of aib-skipstop: checks that run before an expensive command and stop it when it is sure to fail. Checks are data; a check that breaks never stops anything."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+serde_json = "1"
+skipstop-ledger = { path = "../skipstop-ledger" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

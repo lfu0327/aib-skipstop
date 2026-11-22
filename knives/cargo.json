@@ -458,8 +458,8 @@
    "id": "cargo-TB3",
    "why": "every saving of the unit is taken back, whichever run it was reused from",
    "file": "crates/skipstop-ledger/src/timesave.rs",
-   "old": "        .filter(|o| str_of(o, \"unit\") == Some(unit) && str_of(o, \"from\") == Some(from))",
-   "new": "        .filter(|o| str_of(o, \"unit\") == Some(unit) && !from.is_empty())",
+   "old": "        str_of(o, \"unit\") == Some(unit) && str_of(o, \"from\") == Some(from)",
+   "new": "        str_of(o, \"unit\") == Some(unit) && !from.is_empty()",
    "test": "a_revoked_source_takes_back_every_saving_that_stood_on_it_once",
    "cmd": [
     "cargo",
@@ -474,8 +474,8 @@
    "id": "cargo-TB4",
    "why": "another unit reused from the same run is taken back too",
    "file": "crates/skipstop-ledger/src/timesave.rs",
-   "old": "        .filter(|o| str_of(o, \"unit\") == Some(unit) && str_of(o, \"from\") == Some(from))",
-   "new": "        .filter(|o| str_of(o, \"from\") == Some(from) && !unit.is_empty())",
+   "old": "        str_of(o, \"unit\") == Some(unit) && str_of(o, \"from\") == Some(from)",
+   "new": "        str_of(o, \"from\") == Some(from) && !unit.is_empty()",
    "test": "a_revoked_source_takes_back_every_saving_that_stood_on_it_once",
    "cmd": [
     "cargo",
