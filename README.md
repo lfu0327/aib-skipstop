@@ -30,6 +30,11 @@ Rules that will not change:
 - An observe-mode saving is a prediction and is in no total. Confirmed and estimated savings are never added together.
 - Whatever cannot be read is counted as unread, never guessed.
 
+## Install
+
+As an AIB plugin, by hand for now: `docs/PLUGIN.md` has the commands for macOS, Linux and
+Windows (download, check the sum, then run). Or build it here, as below.
+
 ## Try it
 
 Needs Rust (the toolchain in `rust-toolchain.toml`), git, and
@@ -165,6 +170,11 @@ cargo run --release -p skipstop-knife -- run       # all of them, about a minute
 **現況(0.1.0)要講清楚**:預設是「觀察模式」——每個單位都真跑,只在帳上記下「這次本來可以沿用哪一次、結果是否相同」。真沿用已經做好,要加 `--mode real` 才會啟用(有隨機與強制抽查、每週一次全跑的防守輪、`--fresh` 強制全跑);等觀察帳在試用期內沒有不一致,才會改成預設。Stop(`aib-skipstop stop`)也做好了:檢查寫在 `skipstop.stop.json`,`reject` 有發現才擋、`warn` 只印、檢查自己壞掉不擋也不算過;同樣預設觀察、`--mode real` 才真的擋。Rust 以外的語言還沒做。
 
 不會變的規矩:量不到就真跑;沿用的通過蓋不掉這次真跑出來的失敗;觀察模式的省時不進任何合計;已確認與預估永不相加;讀不懂的照實數出來,不猜。
+
+## Releases
+
+`CHANGELOG.md`. A tag `v<version>` builds the three executables and a `SHA256SUMS` into a draft
+release; a person publishes it.
 
 ## License
 
