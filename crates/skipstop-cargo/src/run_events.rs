@@ -80,6 +80,81 @@ pub fn observe(ctx: &Ctx, runner: &str, head: &str, units: &[Ran<'_>], at_ms: i6
     out
 }
 
+fn clock(ms: u64) -> String {
+    let s = ms / 1000;
+    format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+}
+
+/// `+08:00` for 480.
+pub fn offset_text(min: i32) -> String {
+    let sign = if min < 0 { '-' } else { '+' };
+    format!("{sign}{:02}:{:02}", min.abs() / 60, min.abs() % 60)
+}
+
+/// The five boxes as lines for a person: confirmed large, estimated and penalty beside it and
+/// never added in, the two systems apart, and what stands outside every box said last.
+pub fn saved_text(s: &timesave::Summary, offset_min: i32) -> String {
+    let mut out = format!(
+        "time saved (days on a UTC{} clock)\n",
+        offset_text(offset_min)
+    );
+    for (name, p) in [
+        ("today", &s.today),
+        ("this week", &s.week),
+        ("this month", &s.month),
+        ("this year", &s.year),
+        ("all", &s.all),
+    ] {
+        let t = p.total();
+        out += &format!(
+            "  {name:<10} {}  (skip {} · stop {})  estimated {}  taken back {}  savings {}\n",
+            clock(t.confirmed_ms),
+            clock(p.shadow.confirmed_ms),
+            clock(p.precheck.confirmed_ms),
+            clock(t.estimated_ms),
+            clock(t.penalty_ms),
+            t.count
+        );
+    }
+    match s.since_ms {
+        Some(ms) => out += &format!("  since {}\n", skipstop_ledger::envelope::rfc3339_ms(ms)),
+        None => out += "  nothing saved for real yet\n",
+    }
+    if s.observed > 0 {
+        out += &format!(
+            "  {} observe-mode prediction(s): the unit ran anyway, in no total\n",
+            s.observed
+        );
+    }
+    if s.bad > 0 {
+        out += &format!(
+            "  {} more line(s) could not be read and are not counted\n",
+            s.bad
+        );
+    }
+    out
+}
+
+/// The same numbers for a program (the page): milliseconds, nothing formatted.
+pub fn saved_json(s: &timesave::Summary, offset_min: i32) -> Value {
+    let sum = |x: &timesave::Sum| {
+        serde_json::json!({
+            "confirmed_ms": x.confirmed_ms, "estimated_ms": x.estimated_ms,
+            "penalty_ms": x.penalty_ms, "count": x.count,
+        })
+    };
+    let period = |p: &timesave::Period| serde_json::json!({ "total": sum(&p.total()), "skip": sum(&p.shadow), "stop": sum(&p.precheck) });
+    serde_json::json!({
+        "v": 1,
+        "utc_offset_min": offset_min,
+        "today": period(&s.today), "week": period(&s.week), "month": period(&s.month),
+        "year": period(&s.year), "all": period(&s.all),
+        "since": s.since_ms.map(skipstop_ledger::envelope::rfc3339_ms),
+        "observed": s.observed,
+        "unread": s.bad,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +246,54 @@ mod tests {
         assert_eq!(s["avoided"], "cargo nextest run -p reused");
         assert!(s["basis"].as_str().unwrap().contains(from), "{s}");
         assert_eq!(s["head"], "abc123");
+    }
+
+    #[test]
+    fn the_boxes_are_printed_with_estimates_and_predictions_beside_and_never_added_in() {
+        let gate = |ms: u64, confirmed: bool, real: bool| Saved {
+            system: System::Precheck,
+            rule: "knife-precheck",
+            verdict: "reject",
+            avoided: "a run",
+            saved_ms: ms,
+            confirmed,
+            basis: "measured",
+            real,
+            head: None,
+        };
+        let evs = vec![
+            timesave::saved(&ctx(), &gate(3_725_000, true, true), AT).unwrap(),
+            timesave::saved(&ctx(), &gate(60_000, false, true), AT).unwrap(),
+            timesave::saved(&ctx(), &gate(9_999_000, true, false), AT).unwrap(),
+            Value::from("not an event"),
+        ];
+        let s = timesave::summarize(&evs, AT, 480);
+        let text = saved_text(&s, 480);
+        assert!(
+            text.starts_with("time saved (days on a UTC+08:00 clock)\n"),
+            "{text}"
+        );
+        // 1:02:05 confirmed; the estimate (0:01:00) and the prediction are not in it
+        assert!(
+            text.contains("  today      1:02:05  (skip 0:00:00 · stop 1:02:05)  estimated 0:01:00  taken back 0:00:00  savings 2\n"),
+            "{text}"
+        );
+        assert!(text.contains("1 observe-mode prediction(s)"), "{text}");
+        assert!(text.contains("1 more line(s) could not be read"), "{text}");
+        let j = saved_json(&s, 480);
+        assert_eq!(j["today"]["total"]["confirmed_ms"], 3_725_000);
+        assert_eq!(j["today"]["total"]["estimated_ms"], 60_000);
+        assert_eq!(j["all"]["stop"]["count"], 2);
+        assert_eq!(j["all"]["skip"]["confirmed_ms"], 0);
+        assert_eq!(
+            (j["observed"].as_u64(), j["unread"].as_u64()),
+            (Some(1), Some(1))
+        );
+        assert_eq!(offset_text(-330), "-05:30");
+        // nothing real yet is said, not shown as a row of zeros alone
+        let none = timesave::summarize(&[], AT, 0);
+        assert!(saved_text(&none, 0).contains("nothing saved for real yet"));
+        assert!(saved_json(&none, 0)["since"].is_null());
     }
 
     #[test]

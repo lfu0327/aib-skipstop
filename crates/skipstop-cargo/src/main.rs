@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--json] [--why] [--state <dir>]";
+const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--json] [--why] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]";
 
 struct Args {
     packages: Vec<String>,
@@ -30,6 +30,10 @@ struct Args {
     why: bool,
     state: Option<PathBuf>,
     help: bool,
+    /// `saved`: print the time-saved boxes instead of running
+    saved: bool,
+    /// minutes the caller's clock is ahead of UTC (days, weeks, months start on it)
+    utc_offset: i32,
 }
 
 fn args() -> Result<Args, String> {
@@ -39,6 +43,8 @@ fn args() -> Result<Args, String> {
         why: false,
         state: None,
         help: false,
+        saved: false,
+        utc_offset: 0,
     };
     let mut it = std::env::args().skip(1);
     while let Some(x) = it.next() {
@@ -48,6 +54,15 @@ fn args() -> Result<Args, String> {
             "--why" => a.why = true,
             "--state" => a.state = Some(PathBuf::from(it.next().ok_or("--state needs a dir")?)),
             "-h" | "--help" => a.help = true,
+            "saved" if !a.saved && a.packages.is_empty() => a.saved = true,
+            "--utc-offset" => {
+                let v = it.next().ok_or("--utc-offset needs minutes")?;
+                a.utc_offset = v
+                    .parse::<i32>()
+                    .ok()
+                    .filter(|m| (-14 * 60..=14 * 60).contains(m))
+                    .ok_or_else(|| format!("--utc-offset {v:?}: not minutes from -840 to 840"))?;
+            }
             other => return Err(format!("unknown argument {other:?}")),
         }
     }
@@ -167,6 +182,24 @@ fn main() -> ExitCode {
     };
     if a.help {
         println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
+    if a.saved {
+        let dir = state_root(&a).join("events");
+        let (evs, unread) = skipstop_ledger::timesave::read_dirs(std::slice::from_ref(&dir));
+        let mut s = skipstop_ledger::timesave::summarize(&evs, now_ms(), a.utc_offset);
+        s.bad += unread;
+        if a.json {
+            println!(
+                "{}",
+                skipstop_cargo::run_events::saved_json(&s, a.utc_offset)
+            );
+        } else {
+            print!(
+                "{}",
+                skipstop_cargo::run_events::saved_text(&s, a.utc_offset)
+            );
+        }
         return ExitCode::SUCCESS;
     }
     match run(&a) {
