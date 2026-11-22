@@ -432,6 +432,7 @@ fn run(a: &Args) -> Result<Exit, String> {
         let asked = real::Asked {
             streams: &streams,
             fresh: a.fresh,
+            ledger_ok: problems.is_empty(),
             seed: fresh_seed(),
             now_s: now_ms() / 1000,
         };

@@ -117,6 +117,11 @@ fn run(t: &Tmp, args: &[&str]) -> Out {
 
 /// `run` with the hidden input of b's test set or not.
 fn run_env(t: &Tmp, args: &[&str], hidden: Option<&str>) -> Out {
+    run_state(t, "state", args, hidden)
+}
+
+/// `run_env` with the ledger in another state folder of the same workspace (a fresh history).
+fn run_state(t: &Tmp, state: &str, args: &[&str], hidden: Option<&str>) -> Out {
     let mut c = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"));
     match hidden {
         Some(v) => c.env("SKIPSTOP_TEST_HIDDEN", v),
@@ -126,7 +131,7 @@ fn run_env(t: &Tmp, args: &[&str], hidden: Option<&str>) -> Out {
         .current_dir(t.0.join("ws"))
         .args(args)
         .args(["--json", "--state"])
-        .arg(t.0.join("state"))
+        .arg(t.0.join(state))
         .env_remove("AIB_SEAT")
         .env("AIB_SKIPSTOP_SEED", quiet_seed())
         .env_remove("AIB_SKIPSTOP_MODE")
@@ -324,6 +329,70 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
         (0, "run:no_source".into(), "pass".into())
     );
     assert_eq!(r.plan("a"), "reuse");
+
+    // and again: a key a real run disagreed on is never a source again, however green it is now
+    let r = run(&t, &["--mode", "real"]);
+    assert_eq!(
+        (r.rc, r.plan("b"), r.result("b")),
+        (0, "run:no_source".into(), "pass".into()),
+        "{}",
+        r.json
+    );
+    assert_eq!(r.plan("a"), "reuse");
+
+    // flaky without any revocation, in a history of its own: b's first run fails (the hidden
+    // input is set; there is no source yet to disagree with), then it passes on the very same
+    // key. It has a green source now, and its green proves nothing: it runs every time
+    let r = run_state(&t, "state2", &["--mode", "real"], Some("1"));
+    assert_eq!((r.rc, r.result("b")), (1, "fail".into()), "{}", r.json);
+    let r = run_state(&t, "state2", &["--mode", "real"], None);
+    assert_eq!(
+        (r.rc, r.plan("b"), r.result("b")),
+        (0, "run:no_source".into(), "pass".into())
+    );
+    for _ in 0..2 {
+        let r = run_state(&t, "state2", &["--mode", "real"], None);
+        assert_eq!(
+            (r.rc, r.plan("b"), r.result("b")),
+            (0, "run:flaky".into(), "pass".into()),
+            "{}",
+            r.json
+        );
+        assert_eq!(r.plan("a"), "reuse");
+    }
+
+    // a ledger file that cannot be read whole: it may hold a newer failure or a revocation,
+    // so nothing is reused until it is dealt with, and the run says which file
+    let repo_dir = fs::read_dir(&ledger_dir)
+        .unwrap()
+        .flatten()
+        .next()
+        .unwrap()
+        .path();
+    let junk = repo_dir.join("tr-0-junk.jsonl");
+    fs::write(&junk, "{\"not\": \"a ledger line\"}\n").unwrap();
+    let r = run(&t, &["--mode", "real"]);
+    assert_eq!(r.rc, 0, "{}", r.json);
+    assert_eq!(
+        (r.plan("a"), r.plan("c")),
+        ("run:ledger_unread".into(), "run:ledger_unread".into())
+    );
+    assert!(
+        r.json["ledger_problems"]
+            .as_array()
+            .is_some_and(|p| p.len() == 1),
+        "{}",
+        r.json
+    );
+    assert!(
+        r.json["ledger_problems"][0]
+            .as_str()
+            .is_some_and(|p| p.contains("tr-0-junk.jsonl")),
+        "the problem names the file: {}",
+        r.json
+    );
+    fs::remove_file(&junk).unwrap();
+    assert_eq!(run(&t, &["--mode", "real"]).plan("a"), "reuse");
 
     // the mode can be set for the state folder: a plain run is then a real-mode run, and
     // --mode on the command line still wins

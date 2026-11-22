@@ -1,12 +1,17 @@
 //! Real mode: which units of this run are not run. The rule, in the order it is asked:
 //!
-//! 1. `--fresh`, or the unit's defense round is due ⇒ the unit runs.
-//! 2. A unit with no source (no key, no earlier green run of that key on a clean tree, or a
+//! 1. `--fresh` ⇒ every unit runs.
+//! 2. The ledger could not be read whole ⇒ every unit runs: the part that was not read may
+//!    hold a newer failure or a revocation, and an older green run must not stand in for it.
+//! 3. The unit's defense round is due ⇒ the unit runs.
+//! 4. A unit with no source (no key, no earlier green run of that key on a clean tree, or a
 //!    revoked one) runs. What cannot be measured is never reused.
-//! 3. A unit with a source is asked for an audit ([`skipstop_audit::choose`]: the random
+//! 5. A unit whose same key has both passed and failed before (flaky) runs: its green proves
+//!    nothing about the next run.
+//! 6. A unit with a source is asked for an audit ([`skipstop_audit::choose`]: the random
 //!    draw, then the forced reasons: ten reuses in a row, no real run for seven days, …).
 //!    Chosen ⇒ it runs for real and the run is compared with the source.
-//! 4. Otherwise it is reused: not run, and its line names the source.
+//! 7. Otherwise it is reused: not run, and its line names the source.
 //!
 //! The defense round ([`skipstop_audit::defense_due`]) is the one check an audit cannot
 //! replace: an input the unit never listed changes no key, so only running everything finds
@@ -35,7 +40,8 @@ pub const KIND: &str = "test";
 /// What happens to one unit in this run.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
-    /// Runs for real. `why` is a fixed word: `fresh`, `defense_round`, `no_source`.
+    /// Runs for real. `why` is a fixed word: `fresh`, `ledger_unread`, `defense_round`,
+    /// `no_source`, `flaky`.
     Run { why: &'static str },
     /// Has a source, runs anyway, and is compared with it.
     Audit(Choice),
@@ -165,10 +171,37 @@ pub fn defense(streams: &[Stream], unit: &str, now_s: i64) -> Defense {
     )
 }
 
+/// The same key on the same kind of machine has both passed and failed in this unit's real
+/// runs ([`skipstop_audit::flaky`]). A run that could not be read as pass or fail says nothing.
+pub fn flaky_unit(streams: &[Stream], unit: &str) -> bool {
+    let runs: Vec<skipstop_audit::RealRun> = streams
+        .iter()
+        .flat_map(|s| s.units.iter().map(move |(_, u)| (s, u)))
+        .filter(|(_, u)| u.unit == unit && u.how == How::Ran)
+        .filter_map(|(s, u)| {
+            Some(skipstop_audit::RealRun {
+                key: u.key.clone()?,
+                env_id: s.plan.host.clone(),
+                outcome: match u.result {
+                    skipstop_core::ledger::Outcome::Pass => skipstop_audit::Outcome::Pass,
+                    skipstop_core::ledger::Outcome::Fail => skipstop_audit::Outcome::Fail,
+                    _ => return None,
+                },
+                // which runs were reruns after a red is not kept: every run counts, which
+                // can only call more units flaky, never fewer
+                retry_after_red: false,
+            })
+        })
+        .collect();
+    skipstop_audit::flaky(&runs)
+}
+
 /// What one run needs to decide for its units.
 pub struct Asked<'a> {
     pub streams: &'a [Stream],
     pub fresh: bool,
+    /// Every stream of the ledger was read (no problem reported).
+    pub ledger_ok: bool,
     /// A fresh number for this run's random draws.
     pub seed: u64,
     pub now_s: i64,
@@ -179,6 +212,11 @@ pub fn decide(a: &Asked<'_>, unit: &str, has_source: bool) -> Decision {
     if a.fresh {
         return Decision::Run { why: "fresh" };
     }
+    if !a.ledger_ok {
+        return Decision::Run {
+            why: "ledger_unread",
+        };
+    }
     if matches!(defense(a.streams, unit, a.now_s), Defense::Due { .. }) {
         return Decision::Run {
             why: "defense_round",
@@ -186,6 +224,9 @@ pub fn decide(a: &Asked<'_>, unit: &str, has_source: bool) -> Decision {
     }
     if !has_source {
         return Decision::Run { why: "no_source" };
+    }
+    if flaky_unit(a.streams, unit) {
+        return Decision::Run { why: "flaky" };
     }
     let c = choose(
         &history(a.streams, unit),
@@ -286,6 +327,7 @@ mod tests {
         Asked {
             streams,
             fresh,
+            ledger_ok: true,
             seed,
             now_s: NOW_S,
         }
@@ -433,6 +475,59 @@ mod tests {
         // the newest finished round is the one that counts
         let both = [old[0].clone(), done[0].clone()];
         assert_eq!(defense(&both, "a", NOW_S), Defense::NotDue);
+    }
+
+    #[test]
+    fn a_ledger_not_read_whole_runs_everything_and_only_fresh_is_said_before_it() {
+        // the unread part may hold a newer failure or a revocation
+        let done = [round(DAY_MS, &["a"])];
+        let q = quiet_seed("a");
+        let unread = |fresh| Asked {
+            ledger_ok: false,
+            ..ask(&done, fresh, q)
+        };
+        assert_eq!(decide(&unread(false), "a", true), run("ledger_unread"));
+        assert_eq!(decide(&unread(false), "a", false), run("ledger_unread"));
+        assert_eq!(decide(&unread(true), "a", true), run("fresh"));
+        // read whole, the same unit is reused
+        assert_eq!(decide(&ask(&done, false, q), "a", true), Decision::Reuse);
+    }
+
+    #[test]
+    fn a_unit_whose_same_key_passed_and_failed_is_never_reused() {
+        let mut red = unit("a", How::Ran, None);
+        red.result = Outcome::Fail;
+        let mut other_key = red.clone();
+        other_key.key = Some("k2".into());
+        let mut unknown = unit("a", How::Ran, None);
+        unknown.result = Outcome::Invalid;
+        // green and red on the same key
+        let flaky = [round(2 * DAY_MS, &["a"]), plain(DAY_MS, vec![red.clone()])];
+        assert!(flaky_unit(&flaky, "a"));
+        assert_eq!(
+            decide(&ask(&flaky, false, quiet_seed("a")), "a", true),
+            run("flaky")
+        );
+        // red on another key (the code changed and broke: not flaky), or a run that was
+        // neither pass nor fail
+        let changed = [
+            round(2 * DAY_MS, &["a"]),
+            plain(DAY_MS, vec![other_key, unknown]),
+        ];
+        assert!(!flaky_unit(&changed, "a"));
+        assert_eq!(
+            decide(&ask(&changed, false, quiet_seed("a")), "a", true),
+            Decision::Reuse
+        );
+        // another unit's red is not this unit's
+        let mut b_red = red.clone();
+        b_red.unit = "b".into();
+        let other = [round(2 * DAY_MS, &["a"]), plain(DAY_MS, vec![b_red])];
+        assert!(!flaky_unit(&other, "a") && !flaky_unit(&other, "b"));
+        // the same key on another kind of machine is another environment
+        let mut elsewhere = plain(DAY_MS, vec![red]);
+        elsewhere.plan.host = "linux-x86_64".into();
+        assert!(!flaky_unit(&[round(2 * DAY_MS, &["a"]), elsewhere], "a"));
     }
 
     #[test]

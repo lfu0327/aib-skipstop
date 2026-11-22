@@ -603,6 +603,88 @@
     "--locked",
     "--lib"
    ]
+  },
+  {
+   "id": "cargo-LU1",
+   "why": "a ledger that was not read whole is used as if it were: a hidden failure or revocation is looked past",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if !a.ledger_ok {",
+   "new": "    if !a.ledger_ok && false {",
+   "test": "a_ledger_not_read_whole_runs_everything_and_only_fresh_is_said_before_it",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-LU2",
+   "why": "the run never learns its ledger had a problem",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "            ledger_ok: problems.is_empty(),",
+   "new": "            ledger_ok: problems.is_empty() || true,",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-FL1",
+   "why": "a unit that has passed and failed on the same key is reused from its green run",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if flaky_unit(a.streams, unit) {",
+   "new": "    if flaky_unit(a.streams, unit) && false {",
+   "test": "a_unit_whose_same_key_passed_and_failed_is_never_reused",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-FL2",
+   "why": "a red run on another kind of machine makes the unit flaky here",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "                env_id: s.plan.host.clone(),",
+   "new": "                env_id: String::from(\"any\").replace(&s.plan.run_os, \"\"),",
+   "test": "a_unit_whose_same_key_passed_and_failed_is_never_reused",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-FL3",
+   "why": "end to end: a unit that failed and then passed on the same key is reused from its green run",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if flaky_unit(a.streams, unit) {",
+   "new": "    if flaky_unit(a.streams, unit) && false {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
   }
  ]
 }
