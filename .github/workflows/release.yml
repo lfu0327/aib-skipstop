@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: Apache-2.0
+# A tag `v<version>` builds the executable for each system, sums them, and makes a DRAFT
+# release with the files. A draft is not public: publishing it is a person's decision, taken
+# on the release page after looking at it. Nothing here publishes.
+#
+# The tag must equal the workspace version, the plugin file's version and the change log's
+# newest heading, or nothing is built. The main branch's CI must have passed on the tagged
+# commit, or nothing is built.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  check:
+    name: the tag is this version, and CI passed on it
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - id: v
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          v=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          p=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' aib-plugin.json | head -1)
+          c=$(sed -n 's/^## \([^ ]*\) .*/\1/p' CHANGELOG.md | head -1)
+          echo "tag=$TAG cargo=$v plugin=$p changelog=$c"
+          [ -n "$v" ] && [ "$TAG" = "v$v" ] && [ "$p" = "$v" ] && [ "$c" = "$v" ] \
+            || { echo "::error::the tag, Cargo.toml, aib-plugin.json and CHANGELOG.md do not name one version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: CI passed on this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          n=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&status=success" -q '.total_count')
+          echo "green ci runs on $SHA: $n"
+          [ "${n:-0}" -ge 1 ] || { echo "::error::no green ci run on $SHA (push to main first, let it pass, then tag)"; exit 1; }
+  build:
+    needs: check
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, exe: "" }
+          - { os: macos-latest, target: aarch64-apple-darwin, exe: "" }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: ".exe" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: build
+        shell: bash
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          cargo build --release --locked --target ${{ matrix.target }} -p skipstop-cargo
+      - name: name it, and see that it runs and says this version
+        shell: bash
+        env:
+          V: ${{ needs.check.outputs.version }}
+        run: |
+          f="aib-skipstop-$V-${{ matrix.target }}${{ matrix.exe }}"
+          cp "target/${{ matrix.target }}/release/aib-skipstop${{ matrix.exe }}" "$f"
+          got=$("./$f" --version)
+          echo "$got"
+          [ "$got" = "aib-skipstop $V" ] || { echo "::error::it says '$got'"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: aib-skipstop-*
+          if-no-files-found: error
+  draft:
+    needs: [check, build]
+    name: draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write          # create the draft and upload its files; nothing else
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          merge-multiple: true
+          path: out
+      - name: sums, and the draft (refuses to touch a release that is already there)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.check.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cp aib-plugin.json out/
+          cd out
+          ls -la
+          [ "$(ls aib-skipstop-"$V"-* | wc -l)" = 3 ] || { echo "::error::not three executables"; exit 1; }
+          sha256sum aib-skipstop-"$V"-* aib-plugin.json > SHA256SUMS
+          cat SHA256SUMS
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "::error::a release for $TAG is already there"; exit 1; fi
+          awk -v v="$V" '$0 ~ "^## "v" " {p=1; next} /^## / {p=0} p' ../CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "::error::no notes for $V in CHANGELOG.md"; exit 1; }
+          gh release create "$TAG" --draft --title "aib-skipstop $V" --notes-file notes.md \
+            aib-skipstop-"$V"-* aib-plugin.json SHA256SUMS
+          gh release view "$TAG" --json isDraft,assets -q '"draft=\(.isDraft) assets=\([.assets[].name]|join(" "))"'

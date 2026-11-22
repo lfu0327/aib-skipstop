@@ -308,6 +308,10 @@ fn stop_main(rest: &[String]) -> ! {
 
 fn main() -> ExitCode {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(raw.as_slice(), [v] if v == "--version" || v == "-V") {
+        println!("aib-skipstop {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     if raw.first().map(String::as_str) == Some("stop") {
         stop_main(&raw[1..]);
     }
@@ -939,6 +943,30 @@ mod tests {
         let a = audit_of(&v(Some(56), &[]), &v(None, &[]), true);
         assert_eq!(a.compare, AuditCompare::Incomparable);
         assert!(!a.revoke);
+    }
+
+    #[test]
+    fn the_plugin_file_names_this_version_and_the_command_this_crate_builds() {
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../../../aib-plugin.json")).expect("JSON");
+        assert_eq!(v["schema"], "aib-plugin/v1");
+        assert_eq!(v["name"], "aib-skipstop");
+        // one version: the workspace's, the plugin file's and the change log's newest heading
+        assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+        let log = include_str!("../../../CHANGELOG.md");
+        let newest = log
+            .lines()
+            .find_map(|l| l.strip_prefix("## "))
+            .expect("a heading");
+        assert!(
+            newest.starts_with(concat!(env!("CARGO_PKG_VERSION"), " ")),
+            "CHANGELOG.md starts with {newest:?}"
+        );
+        assert_eq!(v["commands"][0]["name"], "aib-skipstop");
+        assert_eq!(v["commands"][0]["bin"], "bin/aib-skipstop");
+        assert_eq!(v["reads"][0]["run"][0], "aib-skipstop");
+        assert!(matches!(v["default"].as_str(), Some("on" | "off")));
+        assert!(v["paid"].is_boolean());
     }
 
     #[test]
