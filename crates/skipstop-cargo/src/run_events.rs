@@ -31,6 +31,8 @@ pub struct Would<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ran<'a> {
     pub unit: &'a str,
+    /// Real mode: the unit was not run; its source's result stands.
+    pub reused: bool,
     pub ms: u64,
     pub tests: u32,
     /// `pass` / `fail` / `invalid` / `none`, the ledger's word.
@@ -71,6 +73,48 @@ pub fn observe(ctx: &Ctx, runner: &str, head: &str, units: &[Ran<'_>], at_ms: i6
                 w.from
             ),
             real: false,
+            head: Some(head).filter(|h| !h.is_empty()),
+        };
+        if let Ok(v) = timesave::saved(ctx, &saved, at_ms) {
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// The events of one real-mode run, in unit order: a unit that ran writes its `unit_time`; a
+/// unit that was reused writes a `time_saved` with `mode = real` when its source says how long
+/// it took (the source's own unit time, a fact, so `confirmed`). A reused unit whose source has
+/// no time writes nothing: it was saved, by a number nobody knows.
+pub fn real(ctx: &Ctx, runner: &str, head: &str, units: &[Ran<'_>], at_ms: i64) -> Vec<Value> {
+    let mut out = Vec::new();
+    for u in units {
+        if !u.reused {
+            let time = Unit {
+                unit: u.unit,
+                ms: u.ms,
+                runner,
+                size: Some(u64::from(u.tests)),
+                load1: None,
+                outcome: u.outcome,
+            };
+            if let Ok(v) = timesave::unit_time(ctx, &time, at_ms) {
+                out.push(v);
+            }
+            continue;
+        }
+        let Some((from, ms)) = u.would.as_ref().and_then(|w| Some((w.from, w.source_ms?))) else {
+            continue;
+        };
+        let saved = Saved {
+            system: System::Shadow,
+            rule: "reuse",
+            verdict: "reuse",
+            avoided: &format!("cargo nextest run -p {}", u.unit),
+            saved_ms: ms,
+            confirmed: true,
+            basis: &format!("the unit's own time in the run it was reused from ({from})"),
+            real: true,
             head: Some(head).filter(|h| !h.is_empty()),
         };
         if let Ok(v) = timesave::saved(ctx, &saved, at_ms) {
@@ -172,6 +216,7 @@ mod tests {
     fn ran<'a>(unit: &'a str, would: Option<Would<'a>>) -> Ran<'a> {
         Ran {
             unit,
+            reused: false,
             ms: 1_500,
             tests: 28,
             outcome: "pass",
@@ -294,6 +339,44 @@ mod tests {
         let none = timesave::summarize(&[], AT, 0);
         assert!(saved_text(&none, 0).contains("nothing saved for real yet"));
         assert!(saved_json(&none, 0)["since"].is_null());
+    }
+
+    #[test]
+    fn a_real_run_saves_what_it_did_not_run_and_times_what_it_ran() {
+        let from = "repo/tr-1";
+        let reused = |unit, source_ms| Ran {
+            reused: true,
+            would: Some(Would {
+                from,
+                source_ms,
+                agreed: true,
+            }),
+            ..ran(unit, None)
+        };
+        let units = [
+            ran("ran", None),
+            reused("skipped", Some(900)),
+            reused("no-time", None),
+        ];
+        let evs = real(&ctx(), "macos-aarch64", "abc123", &units, AT);
+        // the unit that ran: its time; the reused one: a saving and no time of its own;
+        // the one whose source has no time: nothing, not a zero
+        assert_eq!(evs.len(), 2, "{evs:?}");
+        assert_eq!(
+            (evs[0]["kind"].as_str(), evs[0]["unit"].as_str()),
+            (Some("unit_time"), Some("ran"))
+        );
+        let s = &evs[1];
+        assert_eq!(s["kind"], "time_saved");
+        assert_eq!(s["mode"], "real");
+        assert_eq!(s["saved_ms"], 900);
+        assert_eq!(s["confirmed"], true);
+        assert_eq!(s["avoided"], "cargo nextest run -p skipped");
+        assert!(s["basis"].as_str().unwrap().contains(from), "{s}");
+        // and it is in the total, where an observe-mode prediction is not
+        let sum = timesave::summarize(&evs, AT, 0);
+        assert_eq!(sum.all.shadow.confirmed_ms, 900);
+        assert_eq!((sum.all.shadow.count, sum.observed, sum.bad), (1, 0, 0));
     }
 
     #[test]

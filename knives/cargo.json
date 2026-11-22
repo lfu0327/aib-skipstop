@@ -193,6 +193,251 @@
     "skipstop-cargo",
     "--locked"
    ]
+  },
+  {
+   "id": "cargo-RL1",
+   "why": "--fresh is ignored: a unit with a source is still reused",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if a.fresh {",
+   "new": "    if a.fresh && false {",
+   "test": "fresh_the_defense_round_and_no_source_each_run_the_unit_whatever_else_holds",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL2",
+   "why": "the defense round reuses like any run, so an input no key holds is never found",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if matches!(defense(a.streams, unit, a.now_s), Defense::Due { .. }) {",
+   "new": "    if matches!(defense(a.streams, unit, a.now_s), Defense::Due { .. }) && false {",
+   "test": "fresh_the_defense_round_and_no_source_each_run_the_unit_whatever_else_holds",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL3",
+   "why": "a unit with no source is asked for an audit and may be reused from nothing",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if !has_source {",
+   "new": "    if !has_source && false {",
+   "test": "fresh_the_defense_round_and_no_source_each_run_the_unit_whatever_else_holds",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL4",
+   "why": "a unit an audit picked is reused anyway",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if c.audit_kind == AuditKind::None {",
+   "new": "    if c.audit_kind == AuditKind::None || true {",
+   "test": "a_unit_with_a_source_is_still_run_when_the_draw_or_a_forced_reason_picks_it",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL5",
+   "why": "a real run does not end the streak of reuses",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "                h.reuse_streak = 0;",
+   "new": "                h.reuse_streak += 0;",
+   "test": "the_history_is_read_from_the_units_own_lines_in_time_order",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL8",
+   "why": "a reused unit's saving is written as an observe-mode prediction, so it is in no total",
+   "file": "crates/skipstop-cargo/src/run_events.rs",
+   "old": "            real: true,",
+   "new": "            real: false,",
+   "test": "a_real_run_saves_what_it_did_not_run_and_times_what_it_ran",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RM1",
+   "why": "every unit is handed to nextest, reused or not (nothing is saved, the run only says so)",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    for r in rows.iter().filter(|r| r.plan.runs()) {",
+   "new": "    for r in rows.iter().filter(|r| r.plan.runs() || !r.unit.is_empty()) {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-RM2",
+   "why": "observe mode decides like real mode and skips units",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if a.real {\n        let asked = real::Asked {",
+   "new": "    if a.real || !a.fresh {\n        let asked = real::Asked {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-RM4",
+   "why": "a word that is not a mode is read as observe",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        Some(other) => Err(format!(\"mode {other:?}: not observe or real\")),",
+   "new": "        Some(_) => Ok(false),",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-RM5",
+   "why": "a real run that disagrees with its source leaves the source standing",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        revoke: l.revoke,",
+   "new": "        revoke: l.revoke && false,",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-RL6",
+   "why": "a defense round that was killed counts as done",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        .filter(|s| s.complete() && s.plan.cells.iter().any(|c| c == CELL_DEFENSE))",
+   "new": "        .filter(|s| s.plan.cells.iter().any(|c| c == CELL_DEFENSE))",
+   "test": "the_defense_round_is_due_first_and_then_once_a_period_counted_from_a_finished_round",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL7",
+   "why": "any real-mode run counts as a defense round",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        .filter(|s| s.complete() && s.plan.cells.iter().any(|c| c == CELL_DEFENSE))",
+   "new": "        .filter(|s| s.complete() && s.plan.cells.iter().any(|c| c == CELL_DEFENSE || c == CELL_REAL))",
+   "test": "the_defense_round_is_due_first_and_then_once_a_period_counted_from_a_finished_round",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL9",
+   "why": "a round of one package counts as every package's round",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "                .any(|(_, u)| u.unit == unit && u.how == How::Ran)",
+   "new": "                .any(|(_, u)| u.unit == unit || u.how == How::Ran)",
+   "test": "a_round_of_one_package_is_no_round_for_the_others",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RL10",
+   "why": "a unit that was only reused in a round counts as having run in it",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "                .any(|(_, u)| u.unit == unit && u.how == How::Ran)",
+   "new": "                .any(|(_, u)| u.unit == unit)",
+   "test": "a_round_of_one_package_is_no_round_for_the_others",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RM3",
+   "why": "a package new to real mode gets no round of its own when the others are reused",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        last_defense_at(streams, unit),\n        DEFENSE_PERIOD_DAYS,",
+   "new": "        last_defense_at(streams, unit).or(Some(now_s)),\n        DEFENSE_PERIOD_DAYS,",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
   }
  ]
 }

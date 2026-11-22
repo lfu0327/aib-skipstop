@@ -8,6 +8,7 @@
 //!       7 engine error); 64 bad arguments.
 
 use skipstop_audit::{engine, Compare, Outcome as AuditOutcome, Verdict};
+use skipstop_cargo::real::{self, Decision};
 use skipstop_cargo::units::{self, Workspace};
 use skipstop_cargo::{list_args, parse_junit, parse_list, run_args, run_files, tool_config};
 use skipstop_core::context::{self, Context, CARGO_VARS};
@@ -22,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--json] [--why] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]";
+const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--json] [--why] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]";
 
 struct Args {
     packages: Vec<String>,
@@ -32,6 +33,10 @@ struct Args {
     help: bool,
     /// `saved`: print the time-saved boxes instead of running
     saved: bool,
+    /// real mode: a unit with a source that no audit picked is not run
+    real: bool,
+    /// run every unit this time, whatever the ledger says
+    fresh: bool,
     /// minutes the caller's clock is ahead of UTC (days, weeks, months start on it)
     utc_offset: i32,
 }
@@ -44,6 +49,8 @@ fn args() -> Result<Args, String> {
         state: None,
         help: false,
         saved: false,
+        real: mode_real(std::env::var("AIB_SKIPSTOP_MODE").ok().as_deref())?,
+        fresh: false,
         utc_offset: 0,
     };
     let mut it = std::env::args().skip(1);
@@ -54,6 +61,10 @@ fn args() -> Result<Args, String> {
             "--why" => a.why = true,
             "--state" => a.state = Some(PathBuf::from(it.next().ok_or("--state needs a dir")?)),
             "-h" | "--help" => a.help = true,
+            "--mode" => {
+                a.real = mode_real(Some(&it.next().ok_or("--mode needs observe or real")?))?
+            }
+            "--fresh" => a.fresh = true,
             "saved" if !a.saved && a.packages.is_empty() => a.saved = true,
             "--utc-offset" => {
                 let v = it.next().ok_or("--utc-offset needs minutes")?;
@@ -67,6 +78,32 @@ fn args() -> Result<Args, String> {
         }
     }
     Ok(a)
+}
+
+/// `observe` (every unit runs; the default until the observe ledger has earned real mode) or
+/// `real`. Not set = observe; any other word is an error, never a guess.
+fn mode_real(word: Option<&str>) -> Result<bool, String> {
+    match word.map(str::trim) {
+        None | Some("") | Some("observe") => Ok(false),
+        Some("real") => Ok(true),
+        Some(other) => Err(format!("mode {other:?}: not observe or real")),
+    }
+}
+
+/// A number no earlier run had, for this run's random draws. `AIB_SKIPSTOP_SEED=<number>`
+/// fixes it, so a run can be repeated draw for draw (a test, or looking into one audit).
+fn fresh_seed() -> u64 {
+    if let Some(s) = std::env::var("AIB_SKIPSTOP_SEED")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+    {
+        return s;
+    }
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_i64(now_ms());
+    h.write_u32(std::process::id());
+    h.finish()
 }
 
 fn now_ms() -> i64 {
@@ -170,6 +207,8 @@ struct Row {
     result: Outcome,
     ran: u32,
     ms: u64,
+    /// what this run does with the unit
+    plan: Decision,
 }
 
 fn main() -> ExitCode {
@@ -309,56 +348,50 @@ fn run(a: &Args) -> Result<Exit, String> {
             result: Outcome::None,
             ran: 0,
             ms: 0,
+            plan: Decision::Run { why: "observe" },
         });
     }
 
-    // observation mode: every unit runs, one nextest for all of them
+    // real mode: which units are not run this time
+    if a.real {
+        let asked = real::Asked {
+            streams: &streams,
+            fresh: a.fresh,
+            seed: fresh_seed(),
+            now_s: now_ms() / 1000,
+        };
+        for r in &mut rows {
+            r.plan = real::decide(&asked, &r.unit, r.would.is_some());
+        }
+    }
+    // a run in which a unit's defense round ran is a round (for the units that ran in it)
+    let defense_round = rows.iter().any(|r| {
+        r.plan
+            == Decision::Run {
+                why: "defense_round",
+            }
+    });
+
+    // one nextest for every unit that runs (observe mode: all of them)
     std::fs::create_dir_all(&state).map_err(|e| e.to_string())?;
     // absolute, whatever the caller gave: nextest reads the JUnit path in the config as it stands
     let state_abs = std::path::absolute(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     let (cfg, jp) = run_files(&state_abs, std::process::id());
     std::fs::write(&cfg, tool_config(&jp)?).map_err(|e| e.to_string())?;
     let mut select = Vec::new();
-    for n in &chosen {
+    for r in rows.iter().filter(|r| r.plan.runs()) {
         select.push("-p".to_string());
-        select.push(n.clone());
+        select.push(r.unit.clone());
     }
-    // no silent fallback to `cargo test` (519d0 11-17 ruling 2): say what is missing
-    let ver = cargo(&root, &["nextest".to_string(), "--version".to_string()]);
-    if !ver.as_ref().is_ok_and(|o| o.status.success()) {
-        return Err(
-            "cargo-nextest is not installed (cargo nextest --version failed); install it: \
-             cargo install cargo-nextest --locked, or the prebuilt binary from get.nexte.st"
-                .into(),
-        );
-    }
-    let list = cargo(&root, &list_args(&cfg, &select))?;
-    if !list.status.success() {
-        return Err(format!(
-            "cargo nextest list failed: {}",
-            String::from_utf8_lossy(&list.stderr).trim()
-        ));
-    }
-    let listed = parse_list(&String::from_utf8_lossy(&list.stdout))?;
+    let any_runs = !select.is_empty();
     let started = now_ms();
-    // a junit.xml left by an earlier run must never be read as this one's (5d33a L1)
-    match std::fs::remove_file(&jp) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(format!(
-                "{}: cannot clear the last run's result: {e}",
-                jp.display()
-            ))
-        }
-    }
-    let runout = cargo(&root, &run_args(&cfg, &select))?;
-    let xml = std::fs::read_to_string(&jp).map_err(|e| format!("{}: {e}", jp.display()));
-    // this run's two files are read once; left behind they would only pile up
-    let _ = std::fs::remove_file(&jp);
-    let _ = std::fs::remove_file(&cfg);
-    let xml = xml?;
-    let cases = parse_junit(&xml)?;
+    // nothing to run (every unit reused): nextest is not called at all
+    let (listed, cases, run_failed) = if any_runs {
+        run_nextest(&root, &cfg, &jp, &select)?
+    } else {
+        let _ = std::fs::remove_file(&cfg);
+        (skipstop_cargo::List::default(), Vec::new(), false)
+    };
 
     // read the result back per package
     let mut per: BTreeMap<String, (Vec<_>, Vec<_>)> = BTreeMap::new();
@@ -376,6 +409,12 @@ fn run(a: &Args) -> Result<Exit, String> {
     }
     let mut outcomes = Vec::new();
     for r in &mut rows {
+        if !r.plan.runs() {
+            // not run: the source's result stands (a source is a pass on a clean tree)
+            r.result = Outcome::Pass;
+            outcomes.push(RunOutcome::Reused);
+            continue;
+        }
         let (l, c) = per.remove(&r.unit).unwrap_or_default();
         // the unit's own time: the sum of its cases' times (5d33a 0cddcc0c N1; not the whole run's)
         r.ms = c.iter().filter_map(|x| x.ms).sum();
@@ -410,13 +449,18 @@ fn run(a: &Args) -> Result<Exit, String> {
             r.audit = Some(audit_of(&audit, src, met));
         }
         outcomes.push(reading.outcome);
+        // real mode: a real run that disagrees with the source this unit was being reused
+        // from is not a clean run, whatever the unit itself says now
+        if a.real && r.audit.as_ref().is_some_and(|x| x.revoke) {
+            outcomes.push(RunOutcome::SpotCheckDiffers);
+        }
     }
     let code = exit_for(
         &outcomes,
         Use::Local,
         Some(std::env::consts::OS),
         false,
-        !runout.status.success() && cases.is_empty(),
+        run_failed && cases.is_empty(),
         &|_| false,
     );
 
@@ -434,31 +478,44 @@ fn run(a: &Args) -> Result<Exit, String> {
         },
         host: ctx.machine_kind.clone(),
         run_os: std::env::consts::OS.to_string(),
-        cells: vec!["aib-skipstop-observe".into()],
+        cells: vec![if !a.real {
+            real::CELL_OBSERVE
+        } else if defense_round {
+            real::CELL_DEFENSE
+        } else {
+            real::CELL_REAL
+        }
+        .into()],
         units: chosen.clone(),
     };
     let mut w = ledger::Writer::start(&state.join("ledger"), &rid, &inv, &seat, started, &plan)?;
     for r in &rows {
+        let reused = !r.plan.runs();
         let u = Unit {
             unit: r.unit.clone(),
             krate: Some(r.unit.clone()),
-            how: How::Ran,
+            how: if reused { How::Reused } else { How::Ran },
             result: r.result,
-            reuse: None,
+            // the four words a reuse must name: where from, the key, the tree, when
+            reuse: if reused { r.would.clone() } else { None },
             why_not: None,
             why_detail: r.unmeasurable.clone(),
             skip: None,
-            dur_ms: Some(r.ms),
+            dur_ms: if reused { None } else { Some(r.ms) },
             seat: None,
             key: r.key.clone(),
-            tests_ran: Some(r.ran),
+            tests_ran: if reused { None } else { Some(r.ran) },
             failed: r.failed.clone(),
             output_digest: None,
             audit: r.audit.clone(),
-            shadow: Some(Shadow {
-                would_reuse: r.would.clone(),
-                same: r.source_result.map(|s| s == r.result),
-            }),
+            shadow: if reused {
+                None
+            } else {
+                Some(Shadow {
+                    would_reuse: r.would.clone(),
+                    same: r.source_result.map(|s| s == r.result),
+                })
+            },
         };
         w.unit(now_ms(), &u)?;
     }
@@ -475,6 +532,7 @@ fn run(a: &Args) -> Result<Exit, String> {
     let ran: Vec<skipstop_cargo::run_events::Ran<'_>> = rows
         .iter()
         .map(|r| skipstop_cargo::run_events::Ran {
+            reused: !r.plan.runs(),
             unit: &r.unit,
             ms: r.ms,
             tests: r.ran,
@@ -488,7 +546,12 @@ fn run(a: &Args) -> Result<Exit, String> {
         })
         .collect();
     let events_dir = state.join("events");
-    for ev in skipstop_cargo::run_events::observe(&ctx, &plan.host, &head, &ran, at) {
+    let evs = if a.real {
+        skipstop_cargo::run_events::real(&ctx, &plan.host, &head, &ran, at)
+    } else {
+        skipstop_cargo::run_events::observe(&ctx, &plan.host, &head, &ran, at)
+    };
+    for ev in evs {
         // for people to read, never a gate: a write that fails is said and changes nothing
         if let Err(e) = skipstop_ledger::events::append_in(&events_dir, &ev, at) {
             eprintln!("aib-skipstop: event not written: {e}");
@@ -508,6 +571,7 @@ fn run(a: &Args) -> Result<Exit, String> {
             .map(|r| {
                 serde_json::json!({
                     "unit": r.unit, "result": r.result.word(), "tests": r.ran,
+                    "plan": r.plan.word(),
                     "key": r.key, "unmeasurable": r.unmeasurable,
                     "would_reuse": r.would.as_ref().map(|w| serde_json::json!({
                         "from": w.from, "key": w.key, "tree": w.tree, "at": w.at })),
@@ -520,6 +584,8 @@ fn run(a: &Args) -> Result<Exit, String> {
         println!(
             "{}",
             serde_json::json!({"invocation_id": inv, "head": head, "dirty": dirty,
+                "mode": if a.real { "real" } else { "observe" }, "defense_round": defense_round,
+                "cases_run": cases.len(),
                 "exit": code.code(), "units": v, "ledger_problems": problems})
         );
     } else {
@@ -530,7 +596,14 @@ fn run(a: &Args) -> Result<Exit, String> {
                     .as_ref()
                     .map(|w| {
                         format!(
-                            "would reuse {} (key {} tree {} at {})",
+                            "{} {} (key {} tree {} at {})",
+                            if !r.plan.runs() {
+                                "reused from"
+                            } else if a.real {
+                                "ran though it has a source"
+                            } else {
+                                "would reuse"
+                            },
                             w.from,
                             w.key.get(..12).unwrap_or(&w.key),
                             w.tree.get(..12).unwrap_or(&w.tree),
@@ -550,27 +623,116 @@ fn run(a: &Args) -> Result<Exit, String> {
                     Some(a) => format!("{src}; audit {}", a.compare.word()),
                     None => src,
                 };
+                let tests = if r.plan.runs() {
+                    format!("{:>4} tests", r.ran)
+                } else {
+                    "   not run".to_string()
+                };
                 println!(
-                    "  {:<24} {:<7} {:>4} tests  {src}",
+                    "  {:<24} {:<7} {tests}  [{}] {src}",
                     r.unit,
                     r.result.word(),
-                    r.ran
+                    r.plan.word()
                 );
             }
             for p in &problems {
                 println!("  ledger: {p}");
             }
         }
-        println!(
-            "aib-skipstop (observe): {} units ran, {} would have been reused ({} same result), exit {}, ledger {}",
-            rows.len(),
-            would,
-            same,
-            code.code(),
-            ledger::stream_path(&state.join("ledger"), &rid, &inv).display()
-        );
+        let ledger_file = ledger::stream_path(&state.join("ledger"), &rid, &inv);
+        if a.real {
+            let reused = rows.iter().filter(|r| !r.plan.runs()).count();
+            let audits = rows
+                .iter()
+                .filter(|r| matches!(r.plan, Decision::Audit(_)))
+                .count();
+            let revoked = rows
+                .iter()
+                .filter(|r| r.audit.as_ref().is_some_and(|x| x.revoke))
+                .count();
+            println!(
+                "aib-skipstop: {} units, {} reused, {} ran ({} as audits{}){}, exit {}, ledger {}",
+                rows.len(),
+                reused,
+                rows.len() - reused,
+                audits,
+                if revoked > 0 {
+                    format!(", {revoked} source(s) revoked")
+                } else {
+                    String::new()
+                },
+                if defense_round {
+                    "; a defense round: units whose round was due ran whatever their key"
+                } else if a.fresh {
+                    "; --fresh: everything ran"
+                } else {
+                    ""
+                },
+                code.code(),
+                ledger_file.display()
+            );
+        } else {
+            println!(
+                "aib-skipstop (observe): {} units ran, {} would have been reused ({} same result), exit {}, ledger {}",
+                rows.len(),
+                would,
+                same,
+                code.code(),
+                ledger_file.display()
+            );
+        }
     }
     Ok(code)
+}
+
+/// What one nextest call gave: the tests it listed, the cases it ran, and whether it ended
+/// in failure.
+type NextestRun = (skipstop_cargo::List, Vec<skipstop_cargo::Case>, bool);
+
+/// Lists and runs the selected packages with the tool config, reads the JUnit file back and
+/// removes this run's two files.
+fn run_nextest(
+    root: &Path,
+    cfg: &Path,
+    jp: &Path,
+    select: &[String],
+) -> Result<NextestRun, String> {
+    // no silent fallback to `cargo test` (519d0 11-17 ruling 2): say what is missing
+    let ver = cargo(root, &["nextest".to_string(), "--version".to_string()]);
+    if !ver.as_ref().is_ok_and(|o| o.status.success()) {
+        return Err(
+            "cargo-nextest is not installed (cargo nextest --version failed); install it: \
+             cargo install cargo-nextest --locked, or the prebuilt binary from get.nexte.st"
+                .into(),
+        );
+    }
+    let list = cargo(root, &list_args(cfg, select))?;
+    if !list.status.success() {
+        return Err(format!(
+            "cargo nextest list failed: {}",
+            String::from_utf8_lossy(&list.stderr).trim()
+        ));
+    }
+    let listed = parse_list(&String::from_utf8_lossy(&list.stdout))?;
+    // a junit.xml left by an earlier run must never be read as this one's (5d33a L1)
+    match std::fs::remove_file(jp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(format!(
+                "{}: cannot clear the last run's result: {e}",
+                jp.display()
+            ))
+        }
+    }
+    let runout = cargo(root, &run_args(cfg, select))?;
+    let xml = std::fs::read_to_string(jp).map_err(|e| format!("{}: {e}", jp.display()));
+    // this run's two files are read once; left behind they would only pile up
+    let _ = std::fs::remove_file(jp);
+    let _ = std::fs::remove_file(cfg);
+    let xml = xml?;
+    let cases = parse_junit(&xml)?;
+    Ok((listed, cases, !runout.status.success()))
 }
 
 /// The ledger's result in the audit's words (a line with no result never finished).
