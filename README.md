@@ -20,7 +20,7 @@ Said plainly, because a tool that reuses results has to earn trust:
 | Skip: `aib-skipstop` for cargo workspaces (cargo-nextest as the runner) | **observe mode only**: every unit still runs for real; the ledger records which earlier run it would have reused and whether the result came out the same |
 | Skip: really not running a unit | not yet. It is switched on only after the observe ledger shows no disagreement |
 | Stop: the generic precheck frame | not yet |
-| The time-saved events and their sum (today / week / month / year / all) | here, tested; nothing writes them yet |
+| The time-saved events and their sum (today / week / month / year / all) | here, tested. Each run writes its units' times and, in observe mode, the reuses it would have made; `aib-skipstop saved` prints the sum |
 | Other languages than Rust | not yet |
 
 Rules that will not change:
@@ -44,6 +44,13 @@ AIB_SEAT=me /path/to/aib-skipstop/target/release/aib-skipstop --why   # a second
 
 On a clean tree the second run says, per package, which earlier run it would have reused. A tree
 with uncommitted changes is not taken as a source.
+
+```sh
+aib-skipstop saved --utc-offset 480      # the five boxes, days on a UTC+08:00 clock; --json for a program
+```
+
+While only observe mode exists every box is 0 and the predictions are counted beside: a unit that
+ran anyway saved nothing.
 
 The ledger goes under the AIB state root (`--state <dir>`, else `EZ2_AIB_STATE_ROOT`, else
 `EZ2_AIB_HOME`, else `~/.ez2-aib`). `AIB_SEAT` names who ran it; inside AIB the seat sets it.
