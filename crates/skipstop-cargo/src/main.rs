@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--json] [--why] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]";
+const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]";
 
 struct Args {
     packages: Vec<String>,
@@ -35,6 +35,10 @@ struct Args {
     saved: bool,
     /// real mode: a unit with a source that no audit picked is not run
     real: bool,
+    /// `--mode` as given on the command line, which wins over everything else
+    mode_flag: Option<bool>,
+    /// `mode [observe|real]`: show or set the mode this state folder runs in
+    mode_cmd: Option<Option<String>>,
     /// run every unit this time, whatever the ledger says
     fresh: bool,
     /// minutes the caller's clock is ahead of UTC (days, weeks, months start on it)
@@ -49,7 +53,9 @@ fn args() -> Result<Args, String> {
         state: None,
         help: false,
         saved: false,
-        real: mode_real(std::env::var("AIB_SKIPSTOP_MODE").ok().as_deref())?,
+        real: false,
+        mode_flag: None,
+        mode_cmd: None,
         fresh: false,
         utc_offset: 0,
     };
@@ -62,7 +68,15 @@ fn args() -> Result<Args, String> {
             "--state" => a.state = Some(PathBuf::from(it.next().ok_or("--state needs a dir")?)),
             "-h" | "--help" => a.help = true,
             "--mode" => {
-                a.real = mode_real(Some(&it.next().ok_or("--mode needs observe or real")?))?
+                a.mode_flag = Some(mode_word(
+                    &it.next().ok_or("--mode needs observe or real")?,
+                )?)
+            }
+            "mode" if !a.saved && a.mode_cmd.is_none() && a.packages.is_empty() => {
+                a.mode_cmd = Some(None)
+            }
+            w @ ("observe" | "real") if a.mode_cmd == Some(None) => {
+                a.mode_cmd = Some(Some(w.to_string()))
             }
             "--fresh" => a.fresh = true,
             "saved" if !a.saved && a.packages.is_empty() => a.saved = true,
@@ -80,14 +94,45 @@ fn args() -> Result<Args, String> {
     Ok(a)
 }
 
-/// `observe` (every unit runs; the default until the observe ledger has earned real mode) or
-/// `real`. Not set = observe; any other word is an error, never a guess.
-fn mode_real(word: Option<&str>) -> Result<bool, String> {
-    match word.map(str::trim) {
-        None | Some("") | Some("observe") => Ok(false),
-        Some("real") => Ok(true),
-        Some(other) => Err(format!("mode {other:?}: not observe or real")),
+/// `observe` ⇒ false, `real` ⇒ true; any other word is an error, never a guess.
+fn mode_word(word: &str) -> Result<bool, String> {
+    match word.trim() {
+        "observe" => Ok(false),
+        "real" => Ok(true),
+        other => Err(format!("mode {other:?}: not observe or real")),
     }
+}
+
+/// The mode a run is in, the first of these that says: `--mode`, `AIB_SKIPSTOP_MODE`, the
+/// state folder's `mode` file (`aib-skipstop mode real` writes it), else observe. An empty
+/// variable or a missing file says nothing; a word that is not a mode is an error wherever
+/// it stands, so a typo never runs as something else. Returns the mode and who said it.
+fn mode_of(
+    flag: Option<bool>,
+    env: Option<&str>,
+    file: Option<&str>,
+) -> Result<(bool, &'static str), String> {
+    // every word that is given is read first: a typo in the file is an error even when the
+    // flag would win over it
+    fn said(w: Option<&str>) -> Option<&str> {
+        w.map(str::trim).filter(|w| !w.is_empty())
+    }
+    let env = said(env)
+        .map(|w| mode_word(w).map_err(|e| format!("AIB_SKIPSTOP_MODE: {e}")))
+        .transpose()?;
+    let file = said(file)
+        .map(|w| mode_word(w).map_err(|e| format!("the mode file: {e}")))
+        .transpose()?;
+    if let Some(r) = flag {
+        return Ok((r, "--mode"));
+    }
+    if let Some(r) = env {
+        return Ok((r, "AIB_SKIPSTOP_MODE"));
+    }
+    if let Some(r) = file {
+        return Ok((r, "the mode file"));
+    }
+    Ok((false, "the default"))
 }
 
 /// A number no earlier run had, for this run's random draws. `AIB_SKIPSTOP_SEED=<number>`
@@ -223,6 +268,37 @@ fn main() -> ExitCode {
         println!("{USAGE}");
         return ExitCode::SUCCESS;
     }
+    let mode_file = state_root(&a).join("mode");
+    if let Some(Some(word)) = &a.mode_cmd {
+        if let Err(e) = std::fs::create_dir_all(state_root(&a))
+            .and_then(|()| std::fs::write(&mode_file, format!("{word}\n")))
+        {
+            eprintln!("aib-skipstop: {}: {e}", mode_file.display());
+            return ExitCode::from(Exit::EngineError.code() as u8);
+        }
+    }
+    // no file says nothing; a file that is there and cannot be read is not "nothing"
+    let file = match std::fs::read_to_string(&mode_file) {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            eprintln!("aib-skipstop: {}: {e}", mode_file.display());
+            return ExitCode::from(Exit::EngineError.code() as u8);
+        }
+    };
+    let env = std::env::var("AIB_SKIPSTOP_MODE").ok();
+    let (real, said_by) = match mode_of(a.mode_flag, env.as_deref(), file.as_deref()) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("aib-skipstop: {e}");
+            return ExitCode::from(64);
+        }
+    };
+    if a.mode_cmd.is_some() {
+        println!("{} (from {said_by})", if real { "real" } else { "observe" });
+        return ExitCode::SUCCESS;
+    }
+    let a = Args { real, ..a };
     if a.saved {
         let dir = state_root(&a).join("events");
         let (evs, unread) = skipstop_ledger::timesave::read_dirs(std::slice::from_ref(&dir));
@@ -251,14 +327,13 @@ fn main() -> ExitCode {
 }
 
 fn run(a: &Args) -> Result<Exit, String> {
-    // the ledger names who ran it (the auto-drive reads it); never write "unknown" (ebb36 03:4x)
+    // the ledger names who ran it: the AIB seat when there is one (the seat sets AIB_SEAT),
+    // `local` for a run outside AIB. Never "unknown", never a guess at a seat
     let seat = std::env::var("AIB_SEAT")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .ok_or(
-            "AIB_SEAT is not set: the ledger needs the seat that runs it; set AIB_SEAT=<seat code>",
-        )?;
+        .unwrap_or_else(|| "local".to_string());
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = key::repo_root(&cwd).map_err(|e| format!("{e:?}"))?;
     let meta = cargo(
@@ -546,12 +621,34 @@ fn run(a: &Args) -> Result<Exit, String> {
         })
         .collect();
     let events_dir = state.join("events");
+    // what earlier runs saved by reusing a source that has since been revoked is taken back:
+    // the sources this run revoked and every one the ledger already holds, so a take-back
+    // that could not be written once is written now
+    let mut sources = real::revoked_sources(&streams);
+    for r in rows
+        .iter()
+        .filter(|r| r.audit.as_ref().is_some_and(|x| x.revoke))
+    {
+        if let Some(w) = &r.would {
+            sources.push((r.unit.clone(), w.from.clone()));
+        }
+    }
+    sources.sort();
+    sources.dedup();
+    let mut taken_back = Vec::new();
+    if !sources.is_empty() {
+        let (book, _) = skipstop_ledger::timesave::read_dirs(std::slice::from_ref(&events_dir));
+        for (unit, from) in &sources {
+            let back = skipstop_cargo::run_events::take_back(&ctx, &book, unit, from, at);
+            taken_back.extend(back);
+        }
+    }
     let evs = if a.real {
         skipstop_cargo::run_events::real(&ctx, &plan.host, &head, &ran, at)
     } else {
         skipstop_cargo::run_events::observe(&ctx, &plan.host, &head, &ran, at)
     };
-    for ev in evs {
+    for ev in evs.into_iter().chain(taken_back) {
         // for people to read, never a gate: a write that fails is said and changes nothing
         if let Err(e) = skipstop_ledger::events::append_in(&events_dir, &ev, at) {
             eprintln!("aib-skipstop: event not written: {e}");
@@ -787,6 +884,43 @@ mod tests {
         let a = audit_of(&v(Some(56), &[]), &v(None, &[]), true);
         assert_eq!(a.compare, AuditCompare::Incomparable);
         assert!(!a.revoke);
+    }
+
+    #[test]
+    fn the_mode_is_the_first_that_says_and_a_word_that_is_no_mode_is_an_error() {
+        // nothing says: observe
+        assert_eq!(mode_of(None, None, None), Ok((false, "the default")));
+        assert_eq!(
+            mode_of(None, Some(""), Some("\n")),
+            Ok((false, "the default"))
+        );
+        // the file, then the variable over it, then the flag over both
+        assert_eq!(
+            mode_of(None, None, Some("real\n")),
+            Ok((true, "the mode file"))
+        );
+        assert_eq!(
+            mode_of(None, Some("observe"), Some("real\n")),
+            Ok((false, "AIB_SKIPSTOP_MODE"))
+        );
+        assert_eq!(
+            mode_of(Some(true), Some("observe"), Some("observe")),
+            Ok((true, "--mode"))
+        );
+        // a typo is never run as something else
+        assert!(mode_of(None, Some("fast"), None).is_err());
+        // also where something stronger would have won: every word given is read
+        assert!(mode_of(Some(true), Some("ra el"), None)
+            .unwrap_err()
+            .contains("AIB_SKIPSTOP_MODE"));
+        assert!(mode_of(Some(true), None, Some("reel"))
+            .unwrap_err()
+            .contains("mode file"));
+        assert!(mode_of(None, Some("real"), Some("reel")).is_err());
+        assert!(mode_of(None, None, Some("on"))
+            .unwrap_err()
+            .contains("mode file"));
+        assert!(mode_word("Real").is_err());
     }
 
     #[test]

@@ -127,7 +127,7 @@ fn run_env(t: &Tmp, args: &[&str], hidden: Option<&str>) -> Out {
         .args(args)
         .args(["--json", "--state"])
         .arg(t.0.join("state"))
-        .env("AIB_SEAT", "c5d88")
+        .env_remove("AIB_SEAT")
         .env("AIB_SKIPSTOP_SEED", quiet_seed())
         .env_remove("AIB_SKIPSTOP_MODE")
         .env_remove("CARGO_TARGET_DIR")
@@ -183,6 +183,32 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
         ("run:defense_round".into(), "run:defense_round".into())
     );
     assert_eq!(saved(&t)["all"]["total"]["count"], 0);
+    // run outside AIB (no seat set): the ledger says `local`, not a made-up seat
+    let ledger_dir = t.0.join("state/ledger");
+    let mut lines = String::new();
+    for repo in fs::read_dir(&ledger_dir).unwrap().flatten() {
+        for f in fs::read_dir(repo.path()).unwrap().flatten() {
+            lines += &fs::read_to_string(f.path()).unwrap();
+        }
+    }
+    assert!(lines.contains("\"seat\":\"local\""), "{lines}");
+    assert!(!lines.contains("\"seat\":\"unknown\""));
+    // a mode file that is there and is not a mode stops the run instead of running as observe
+    fs::write(t.0.join("state/mode"), "reel\n").unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))
+        .current_dir(t.0.join("ws"))
+        .args(["--mode", "real", "--state"])
+        .arg(t.0.join("state"))
+        .env_remove("AIB_SKIPSTOP_MODE")
+        .output()
+        .unwrap();
+    assert_eq!(
+        o.status.code(),
+        Some(64),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    fs::remove_file(t.0.join("state/mode")).unwrap();
 
     // nothing changed: neither unit runs, and each names the run it is reused from
     let r = run(&t, &["--mode", "real"]);
@@ -274,11 +300,23 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
     // an input no key holds changes (what a defense round is for): b's key is the same, so it
     // would be reused. Run for real, it disagrees with its source: the run is not green and
     // the source is revoked
+    let before = saved(&t);
     let r = run_env(&t, &["--mode", "real", "--fresh"], Some("1"));
     assert_eq!(r.rc, 1, "{}", r.json);
     assert_eq!(r.result("b"), "fail");
     assert_eq!(r.unit("b")["audit"]["revoke"], true, "{}", r.json);
     assert_eq!(r.unit("a")["audit"]["revoke"], false, "{}", r.json);
+    // what earlier runs saved by reusing b from that source is taken back, and only that
+    let after = saved(&t);
+    let n = |v: &serde_json::Value, k: &str| v["all"]["skip"][k].as_u64().unwrap();
+    assert!(n(&after, "penalty_ms") > 0, "{after}");
+    assert!(n(&after, "count") < n(&before, "count"), "{before} {after}");
+    assert_eq!(
+        n(&before, "confirmed_ms") - n(&after, "confirmed_ms"),
+        n(&after, "penalty_ms"),
+        "{before} {after}"
+    );
+    assert_eq!(after["unread"], 0);
     // the hidden input is gone again, but a revoked source is never a source again: b runs
     let r = run(&t, &["--mode", "real"]);
     assert_eq!(
@@ -286,6 +324,41 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
         (0, "run:no_source".into(), "pass".into())
     );
     assert_eq!(r.plan("a"), "reuse");
+
+    // the mode can be set for the state folder: a plain run is then a real-mode run, and
+    // --mode on the command line still wins
+    let mode = |args: &[&str]| {
+        let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))
+            .args(args)
+            .arg("--state")
+            .arg(t.0.join("state"))
+            .env_remove("AIB_SKIPSTOP_MODE")
+            .output()
+            .unwrap();
+        (
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        )
+    };
+    assert_eq!(
+        mode(&["mode"]),
+        (Some(0), "observe (from the default)".into())
+    );
+    assert_eq!(
+        mode(&["mode", "real"]),
+        (Some(0), "real (from the mode file)".into())
+    );
+    let r = run(&t, &[]);
+    assert_eq!(
+        (r.rc, r.json["mode"].as_str()),
+        (0, Some("real")),
+        "{}",
+        r.json
+    );
+    assert_eq!(r.plan("a"), "reuse");
+    let r = run(&t, &["--mode", "observe"]);
+    assert_eq!(r.json["mode"], "observe");
+    assert_eq!(mode(&["mode", "observe"]).1, "observe (from the mode file)");
 
     // a word that is not a mode is refused, not read as one
     let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))

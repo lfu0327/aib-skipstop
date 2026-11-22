@@ -117,6 +117,25 @@ pub fn last_defense_at(streams: &[Stream], unit: &str) -> Option<i64> {
         .max()
 }
 
+/// Every (unit, source run) the ledger says was revoked: a line that ran, was compared with the
+/// source it would have been reused from, and disagreed. Sorted, each once. What earlier runs
+/// saved on such a source is taken back; asking on every run means a take-back that could
+/// not be written once is written by a later run.
+pub fn revoked_sources(streams: &[Stream]) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = streams
+        .iter()
+        .flat_map(|s| s.units.iter())
+        .filter(|(_, u)| u.audit.as_ref().is_some_and(|a| a.revoke))
+        .filter_map(|(_, u)| {
+            let from = &u.shadow.as_ref()?.would_reuse.as_ref()?.from;
+            Some((u.unit.clone(), from.clone()))
+        })
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
 /// (audited, candidates) of the one kind there is: a candidate is a line that ran with a
 /// source to compare against or was reused.
 pub fn kind_counts(streams: &[Stream]) -> KindCounts {
@@ -414,6 +433,39 @@ mod tests {
         // the newest finished round is the one that counts
         let both = [old[0].clone(), done[0].clone()];
         assert_eq!(defense(&both, "a", NOW_S), Defense::NotDue);
+    }
+
+    #[test]
+    fn the_revoked_sources_are_read_back_from_the_ledger_each_once() {
+        use skipstop_core::ledger::{Origin, Reuse, Shadow};
+        let would = |from: &str| {
+            Some(Shadow {
+                would_reuse: Some(Reuse {
+                    origin: Origin::Local,
+                    from: from.into(),
+                    key: "k".into(),
+                    tree: "t".into(),
+                    at: "2026-11-22T00:00:00.000Z".into(),
+                }),
+                same: Some(false),
+            })
+        };
+        let mut bad = unit("b", How::Ran, Some(AuditCompare::Mismatch));
+        bad.shadow = would("repo/tr-1");
+        // compared and the same: not revoked
+        let mut fine = unit("a", How::Ran, Some(AuditCompare::Same));
+        fine.shadow = would("repo/tr-1");
+        // revoked, but the line does not say from which run: nothing to take back by
+        let lost = unit("c", How::Ran, Some(AuditCompare::Mismatch));
+        let st = [
+            plain(2 * DAY_MS, vec![bad.clone(), fine, lost]),
+            plain(DAY_MS, vec![bad]),
+        ];
+        assert_eq!(
+            revoked_sources(&st),
+            vec![("b".to_string(), "repo/tr-1".to_string())]
+        );
+        assert!(revoked_sources(&[]).is_empty());
     }
 
     #[test]

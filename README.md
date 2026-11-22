@@ -38,8 +38,8 @@ Needs Rust (the toolchain in `rust-toolchain.toml`), git, and
 ```sh
 cargo build --release
 cd /path/to/a/cargo/workspace            # a git checkout
-AIB_SEAT=me /path/to/aib-skipstop/target/release/aib-skipstop --why
-AIB_SEAT=me /path/to/aib-skipstop/target/release/aib-skipstop --why   # a second run, same tree
+/path/to/aib-skipstop/target/release/aib-skipstop --why
+/path/to/aib-skipstop/target/release/aib-skipstop --why   # a second run, same tree
 ```
 
 On a clean tree the second run says, per package, which earlier run it would have reused. A tree
@@ -55,8 +55,10 @@ saved nothing.
 ### Real mode
 
 ```sh
-AIB_SEAT=me aib-skipstop --mode real --why     # or AIB_SKIPSTOP_MODE=real
-AIB_SEAT=me aib-skipstop --mode real --fresh   # run everything this time, whatever the ledger says
+aib-skipstop --mode real --why     # this run only
+aib-skipstop --mode real --fresh   # run everything this time, whatever the ledger says
+aib-skipstop mode real             # from now on, for this state folder; `mode observe` turns it back
+aib-skipstop mode                  # which mode, and who said so
 ```
 
 A unit is **not run** only when all of this holds: its key could be worked out; an earlier run of
@@ -72,8 +74,14 @@ no audit picked the unit this time. Otherwise it runs:
 
 A failure is never a source: a red unit runs again until it is green.
 
+The mode is the first of these that says: `--mode`, the variable `AIB_SKIPSTOP_MODE`, the state
+folder's mode (`aib-skipstop mode real`), else observe. A word that is not a mode is an error
+wherever it stands. When a source is revoked, what earlier runs had saved by reusing it is taken
+back out of the total and shown as taken back.
+
 The ledger goes under the AIB state root (`--state <dir>`, else `EZ2_AIB_STATE_ROOT`, else
-`EZ2_AIB_HOME`, else `~/.ez2-aib`). `AIB_SEAT` names who ran it; inside AIB the seat sets it.
+`EZ2_AIB_HOME`, else `~/.ez2-aib`). Inside AIB the seat sets `AIB_SEAT` and the ledger names it;
+outside AIB nothing needs to be set and the ledger says `local`.
 
 ## Layout
 

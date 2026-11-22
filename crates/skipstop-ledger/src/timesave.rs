@@ -11,7 +11,7 @@
 //!
 //! | kind | own fields |
 //! |---|---|
-//! | `time_saved` | `system` (`precheck` / `shadow`), `rule`, `verdict` (`reject` / `warn` / `reuse`), `avoided`, `saved_ms`, `confirmed`, `basis`, `mode` (`observe` / `real`), `head` (may be absent) |
+//! | `time_saved` | `system` (`precheck` / `shadow`), `rule`, `verdict` (`reject` / `warn` / `reuse`), `avoided`, `saved_ms`, `confirmed`, `basis`, `mode` (`observe` / `real`), `head` (may be absent), `unit` and `from` (a reuse: what was not run and the run its result came from) |
 //! | `time_saved_confirm` | `ref`: the id of a `time_saved` that was an estimate and has since been checked |
 //! | `time_saved_wrong` | `ref`, `penalty_ms`, `basis`: that saving was a wrong block / a wrong reuse |
 //! | `unit_time` | `unit`, `ms`, `runner`, `size` and `load1` (may be absent) |
@@ -90,6 +90,10 @@ pub struct Saved<'a> {
     /// false: observe mode, nothing was really stopped or reused.
     pub real: bool,
     pub head: Option<&'a str>,
+    /// What was not done, as a name a later event can be matched on (the unit), and where
+    /// the result came from instead (the source run). Both or neither: they are how a saving
+    /// is found again when its source turns out wrong.
+    pub of: Option<(&'a str, &'a str)>,
 }
 
 /// [`clean_text`] without the blanks around it: a field of blanks is an empty field.
@@ -137,6 +141,14 @@ pub fn saved(ctx: &Ctx, s: &Saved<'_>, at_ms: i64) -> Result<Value, String> {
     );
     if let Some(h) = s.head {
         m.insert("head".into(), json!(clean_text(h)));
+    }
+    if let Some((unit, from)) = s.of {
+        let (unit, from) = (text(unit), text(from));
+        if unit.is_empty() || from.is_empty() {
+            return Err("a saving that names its unit and source names both".into());
+        }
+        m.insert("unit".into(), json!(unit));
+        m.insert("from".into(), json!(from));
     }
     Ok(events::build(ctx, KIND_SAVED, "saved", at_ms, m))
 }
@@ -459,6 +471,25 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
     out.year = year;
     out.all = all;
     out
+}
+
+/// The real savings that stand on `unit` reused from the run `from` and that no
+/// `time_saved_wrong` has taken back yet: (id, saved_ms), in the order written. What a
+/// program writes its `time_saved_wrong` events from when that source is revoked.
+pub fn standing_on(evs: &[Value], unit: &str, from: &str) -> Vec<(String, u64)> {
+    let taken: std::collections::BTreeSet<&str> = evs
+        .iter()
+        .filter(|v| v["kind"] == KIND_WRONG)
+        .filter_map(|v| v["ref"].as_str())
+        .collect();
+    evs.iter()
+        .filter_map(Value::as_object)
+        .filter(|o| str_of(o, "kind") == Some(KIND_SAVED) && str_of(o, "mode") == Some("real"))
+        .filter(|o| str_of(o, "unit") == Some(unit) && str_of(o, "from") == Some(from))
+        .filter_map(|o| Some((str_of(o, "id")?, o.get("saved_ms")?.as_u64()?)))
+        .filter(|(id, _)| !taken.contains(id))
+        .map(|(id, ms)| (id.to_string(), ms))
+        .collect()
 }
 
 /// Every event object of `progs`' month files under `root`, oldest file first within a
