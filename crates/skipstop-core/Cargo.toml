@@ -1,0 +1,20 @@
+[package]
+name = "skipstop-core"
+description = "The skip engine of aib-skipstop: a unit's key from the files on disk, the reasons a unit did not run, exit codes, receipts and the run ledger. Knows no test framework and no CI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+sha2 = "0.10.9"
+skipstop-ledger = { path = "../skipstop-ledger" }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

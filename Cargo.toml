@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/skipstop-ledger",
+    "crates/skipstop-core",
+    "crates/skipstop-audit",
+    "crates/skipstop-cargo",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.99"
+repository = "https://github.com/lfu0327/aib-skipstop"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+unwrap_used = "warn"
+
+# A unit's key is the SHA-256 of its input files. Without optimisation sha2 does about 20 MB/s,
+# and that is what a debug build or a test run would spend its time on.
+[profile.dev.package.sha2]
+opt-level = 3

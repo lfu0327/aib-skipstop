@@ -1,0 +1,18 @@
+[package]
+name = "skipstop-ledger"
+description = "Append-only JSONL ledger and month-file events for aib-skipstop: one lock file waited for a bounded time, one whole line appended and synced, a bad or cut-short line reported instead of skipped; the time-saved events and their five-box sum. Unix and Windows."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

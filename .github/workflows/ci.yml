@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# Format, lints and tests on the three systems aib-skipstop is to work on. The toolchain is the
+# one rust-toolchain.toml pins; rustup installs it on the first cargo call.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: toolchain (pinned by rust-toolchain.toml)
+        shell: bash
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+      - name: format
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo fmt --all -- --check
+      - name: clippy
+        shell: bash
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: test
+        shell: bash
+        run: cargo test --workspace --locked
