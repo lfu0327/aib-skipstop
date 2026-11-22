@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]";
+const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]\n       aib-skipstop stop [--config <file>] [--mode observe|real] [--no-stop] [--state <dir>] (check | -- <command>...)";
 
 struct Args {
     packages: Vec<String>,
@@ -256,7 +256,61 @@ struct Row {
     plan: Decision,
 }
 
+/// `aib-skipstop stop …`: the stop half, with this binary's state root and mode rules (its
+/// own variable and mode file, so skip and stop are switched apart).
+fn stop_main(rest: &[String]) -> ! {
+    let state = |flag: Option<&Path>| {
+        root_from(
+            flag,
+            std::env::var("EZ2_AIB_STATE_ROOT").ok().as_deref(),
+            std::env::var("EZ2_AIB_HOME").ok().as_deref(),
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .as_deref(),
+        )
+    };
+    let mode = |flag: Option<bool>, state: &Path| {
+        let file = match std::fs::read_to_string(state.join("stop-mode")) {
+            Ok(t) => Some(t),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(format!("{}: {e}", state.join("stop-mode").display())),
+        };
+        let env = std::env::var("AIB_SKIPSTOP_STOP_MODE").ok();
+        mode_of(flag, env.as_deref(), file.as_deref()).map(|(real, by)| {
+            let by = match by {
+                "AIB_SKIPSTOP_MODE" => "AIB_SKIPSTOP_STOP_MODE",
+                "the mode file" => "the stop-mode file",
+                other => other,
+            };
+            (real, by)
+        })
+    };
+    let cwd = std::env::current_dir().ok();
+    let ask = |what: &[&str]| cwd.as_deref().and_then(|d| git(d, what));
+    let head = ask(&["rev-parse", "HEAD"]).unwrap_or_default();
+    let root = ask(&["rev-parse", "--show-toplevel"])
+        .filter(|r| !r.is_empty())
+        .map(PathBuf::from);
+    let prefix = ask(&["rev-parse", "--show-prefix"]).unwrap_or_default();
+    let env = skipstop_stop::run::Env {
+        state: &state,
+        mode: &mode,
+        head,
+        root,
+        prefix,
+        seat: std::env::var("AIB_SEAT").ok(),
+        now_ms: now_ms(),
+    };
+    // the protected command's own exit code is passed on whole (Windows codes go past 255)
+    std::process::exit(skipstop_stop::run::cli(rest, &env))
+}
+
 fn main() -> ExitCode {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.first().map(String::as_str) == Some("stop") {
+        stop_main(&raw[1..]);
+    }
     let a = match args() {
         Ok(a) => a,
         Err(e) => {

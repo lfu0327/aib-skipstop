@@ -225,6 +225,7 @@ dependencies = [
  "skipstop-audit",
  "skipstop-core",
  "skipstop-ledger",
+ "skipstop-stop",
 ]
 
 [[package]]
@@ -250,6 +251,15 @@ name = "skipstop-ledger"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "skipstop-stop"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "skipstop-ledger",
  "tempfile",
 ]
 

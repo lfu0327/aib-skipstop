@@ -12,6 +12,7 @@ repository.workspace = true
 skipstop-core = { path = "../skipstop-core" }
 skipstop-audit = { path = "../skipstop-audit" }
 skipstop-ledger = { path = "../skipstop-ledger" }
+skipstop-stop = { path = "../skipstop-stop" }
 serde_json = "1"
 
 [dev-dependencies]

@@ -4,6 +4,7 @@ members = [
     "crates/skipstop-ledger",
     "crates/skipstop-core",
     "crates/skipstop-audit",
+    "crates/skipstop-stop",
     "crates/skipstop-cargo",
     "crates/skipstop-knife",
 ]
