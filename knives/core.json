@@ -1,0 +1,420 @@
+{
+ "knives": [
+  {
+   "id": "core-LG1",
+   "why": "inside one stream, of two lines of one millisecond the earlier one wins",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "    (at, inv) >= (than_at, than_inv)",
+   "new": "    (at, inv) > (than_at, than_inv) // knife",
+   "test": "evidence_and_local_source_order_lines_of_one_millisecond_the_same_way",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG2",
+   "why": "a pass counts on a run that never ended (keeps `complete` used: RUSTFLAGS has -D warnings)",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "        How::Ran => complete && u.result == Outcome::Pass,",
+   "new": "        How::Ran => (complete || true) && u.result == Outcome::Pass, // knife",
+   "test": "a_pass_counts_only_on_a_run_that_ended_on_its_normal_path",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG3",
+   "why": "a reuse from this machine's own ledger is evidence",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "                    r.origin == Origin::External",
+   "new": "                    (r.origin == Origin::External || true) // knife",
+   "test": "a_reuse_is_evidence_only_from_outside_with_all_four_words",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG4",
+   "why": "a reuse missing one of its four words is evidence",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "                            .all(|x| !x.trim().is_empty())",
+   "new": "                            .all(|x| !x.is_empty() || x.is_empty()) // knife",
+   "test": "a_reuse_is_evidence_only_from_outside_with_all_four_words",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG5",
+   "why": "a reuse is evidence whatever key it was found by (b433b L2)",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "                        && u.key.as_deref() == Some(r.key.as_str())",
+   "new": "                        && (u.key.is_some() || u.key.is_none()) // knife",
+   "test": "a_reuse_is_evidence_only_from_outside_with_all_four_words",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG6",
+   "why": "a line after end is read",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "        if ended.is_some() {",
+   "new": "        if ended.is_some() && next == 0 { // knife",
+   "test": "a_stream_that_is_not_plan_first_or_skips_a_number_is_not_used",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG7",
+   "why": "the seat may change inside a stream",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "            Some(first) if *first != who => return Err(\"seat changed inside a stream\".into()),",
+   "new": "            Some(first) if *first != who && who.is_empty() => return Err(\"seat changed inside a stream\".into()), // knife",
+   "test": "a_stream_that_is_not_plan_first_or_skips_a_number_is_not_used",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG8",
+   "why": "a pass on a run that did not finish is a source",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "    best.filter(|(st, u, _)| u.how == How::Ran && st.complete() && u.result == Outcome::Pass)",
+   "new": "    best.filter(|(_, u, _)| u.how == How::Ran && u.result == Outcome::Pass) // knife",
+   "test": "a_local_source_is_the_newest_complete_pass_with_the_same_key",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG9",
+   "why": "\"not this OS\" naming the OS the run was on is harmless (b433b M1)",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "            .is_some_and(|s| s.harmless_on(Use::Evidence, Some(run_os), bite_shown)),",
+   "new": "            .is_some_and(|s| s.harmless_on(Use::Evidence, None.or(Some(run_os)).filter(|_| false), bite_shown)), // knife",
+   "test": "skips_follow_the_receipt_rules_and_not_run_is_never_green",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG10",
+   "why": "the writer takes a line the reader refuses (b433b L1)",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "        check_unit(u)?;",
+   "new": "        let _ = check_unit(u); // knife",
+   "test": "the_writer_refuses_what_the_reader_would_refuse",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG11",
+   "why": "an empty stream file is a problem (b433b L4)",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "            Ok(skipstop_ledger::Read::Text(t)) if t.is_empty() => continue,",
+   "new": "            Ok(skipstop_ledger::Read::Text(t)) if t.is_empty() && t.len() > 1 => continue, // knife",
+   "test": "an_empty_stream_file_is_a_run_not_started_and_a_failed_plan_leaves_none",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG12",
+   "why": "a newer run that did not run is looked past (b433b L3)",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "                || !matches!(u.how, How::Ran | How::NotRun)",
+   "new": "                || !matches!(u.how, How::Ran) // knife",
+   "test": "a_local_source_is_the_newest_complete_pass_with_the_same_key",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG13",
+   "why": "a source a spot check revoked is still a source",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "                && u.audit.as_ref().is_some_and(|a| a.revoke)",
+   "new": "                && u.audit.as_ref().is_some_and(|a| a.revoke && a.compare == AuditCompare::Same) // knife",
+   "test": "a_spot_check_and_what_it_compares_are_written_and_read_back_and_a_revoke_ends_the_source",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG14",
+   "why": "a run on a dirty tree is a source (043dd 04:51)",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "                || st.plan.tree.ends_with(\"+dirty\")",
+   "new": "                || st.plan.tree.ends_with(\"+dirty\") && st.plan.tree.is_empty() // knife",
+   "test": "a_dirty_tree_is_no_source_and_unknown_is_no_seat",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-LG15",
+   "why": "the writer takes \"unknown\" as a seat",
+   "file": "crates/skipstop-core/src/ledger.rs",
+   "old": "        if !plain_id(seat) || seat == \"unknown\" {",
+   "new": "        if !plain_id(seat) || seat == \"unknown-\" { // knife",
+   "test": "a_dirty_tree_is_no_source_and_unknown_is_no_seat",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-E1",
+   "why": "a pass that tested nothing (tests_ran None) counts as a pass",
+   "file": "crates/skipstop-core/src/exit.rs",
+   "old": "                if tests_ran.unwrap_or(0) > 0 {",
+   "new": "                if tests_ran.unwrap_or(1) > 0 { // knife",
+   "test": "a_pass_with_no_test_run_is_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-E2",
+   "why": "a failure that ran now is covered by a reused pass",
+   "file": "crates/skipstop-core/src/exit.rs",
+   "old": "            Outcome::Ran { met: false, .. } => e = e.worse(Exit::Failed),",
+   "new": "            Outcome::Ran { met: false, .. } => {} // knife",
+   "test": "a_reused_pass_does_not_cover_a_failure_that_ran_now",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-E3",
+   "why": "a spot check that differs outranks a failure",
+   "file": "crates/skipstop-core/src/exit.rs",
+   "old": "            Exit::SpotCheckDiffers => 6,",
+   "new": "            Exit::SpotCheckDiffers => 8, // knife",
+   "test": "the_worst_code_wins_in_the_written_order",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-S1",
+   "why": "\"not this OS\" with no OS named is harmless",
+   "file": "crates/skipstop-core/src/skip.rs",
+   "old": "            SkipWhy::NotThisOs { os } => !os.trim().is_empty(),",
+   "new": "            SkipWhy::NotThisOs { os } => !os.is_empty() || os.is_empty(), // knife",
+   "test": "the_os_and_event_skips_are_harmless_anywhere",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-S2",
+   "why": "the user's own filter is harmless in evidence too",
+   "file": "crates/skipstop-core/src/skip.rs",
+   "old": "            SkipWhy::UserFilter => used == Use::Local,",
+   "new": "            SkipWhy::UserFilter => used == Use::Local || used == Use::Evidence, // knife",
+   "test": "a_user_filter_is_harmless_locally_but_not_as_evidence",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-S3",
+   "why": "\"not this OS\" naming the OS the run is on is harmless",
+   "file": "crates/skipstop-core/src/skip.rs",
+   "old": "            if os.trim().eq_ignore_ascii_case(run.trim()) {",
+   "new": "            if os.trim() == \"never-an-os\" && !run.is_empty() { // knife",
+   "test": "the_os_and_event_skips_are_harmless_anywhere",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-K1",
+   "why": "a file changed inside the racy window is cached",
+   "file": "crates/skipstop-core/src/key.rs",
+   "old": "        .is_none_or(|age| age < RACY);",
+   "new": "        .is_none_or(|age| age < Duration::ZERO); // knife",
+   "test": "a_same_size_rewrite_keeping_the_old_time_is_still_seen",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-K2",
+   "why": "the cache trusts the length alone",
+   "file": "crates/skipstop-core/src/key.rs",
+   "old": "            if old == st {",
+   "new": "            if old.len == st.len { // knife",
+   "test": "an_old_unchanged_file_comes_from_the_cache_and_a_rewrite_is_read_again",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-K3",
+   "why": "a declared path that matched nothing reads as unchanged",
+   "file": "crates/skipstop-core/src/key.rs",
+   "old": "        if hit.is_empty() {",
+   "new": "        if hit.is_empty() && pre == \"never\" { // knife",
+   "test": "a_declared_path_that_matches_nothing_is_not_measured",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-C1",
+   "why": "a variable's value goes into the entries as written (a registry token on disk)",
+   "file": "crates/skipstop-core/src/context.rs",
+   "old": "                m.insert(format!(\"env:{k}\"), sha(v));",
+   "new": "                m.insert(format!(\"env:{k}\"), v.clone()); // knife",
+   "test": "a_registry_token_never_shows_in_the_entries_and_still_moves_the_key",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "core-C2",
+   "why": "an empty toolchain still gives a key",
+   "file": "crates/skipstop-core/src/context.rs",
+   "old": "        if self.toolchain.trim().is_empty() {",
+   "new": "        if self.toolchain.trim() == \"never\" { // knife",
+   "test": "an_empty_toolchain_or_machine_kind_is_not_measured",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-core",
+    "--locked",
+    "--lib"
+   ]
+  }
+ ]
+}

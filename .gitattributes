@@ -1,0 +1,3 @@
+# One line ending on every system: a knife anchor may span lines, and a unit's key is the
+# hash of its input files, so the bytes must not depend on who checked the repo out.
+* text=auto eol=lf

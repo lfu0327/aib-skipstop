@@ -1,0 +1,490 @@
+{
+ "knives": [
+  {
+   "id": "ledger-EV1",
+   "why": "a kind's own field rewrites who / which card",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "        if !COMMON.contains(&k.as_str()) {",
+   "new": "        if !COMMON.contains(&k.as_str()) || k.len() < 100 { // knife",
+   "test": "a_kind_cannot_rewrite_the_common_fields",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV2",
+   "why": "a host or knife name in the status line is taken as a card",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "            && is_node(w)",
+   "new": "            && (is_node(w) || w.len() > 1) // knife",
+   "test": "only_card_ids_in_the_tree_are_taken_from_a_status_line",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV3",
+   "why": "two events in one process share an id",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "    let seq = SEQ.fetch_add(1, Ordering::Relaxed);",
+   "new": "    let seq = SEQ.load(Ordering::Relaxed); // knife",
+   "test": "ids_never_repeat_and_a_nameless_machine_gets_a_random_tag",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV4",
+   "why": "a failed write stops the caller",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "        eprintln!(\"{prog}: event not written: {e}\");",
+   "new": "        panic!(\"{prog}: event not written: {e}\"); // knife",
+   "test": "a_write_that_fails_leaves_the_caller_alone",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV5",
+   "why": "a month file goes before its whole month is past keep_days",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "        if !month_end_ms(&name).is_some_and(|end| end <= cutoff) {",
+   "new": "        if !month_end_ms(&name).is_some_and(|end| end <= cutoff + 31 * 86_400_000) { // knife",
+   "test": "old_months_go_whole_and_other_files_stay",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV6",
+   "why": "a seat code walks out of seat-now",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "    if !seat_code(seat) {",
+   "new": "    if seat.is_empty() { // knife",
+   "test": "a_seat_that_is_not_named_is_null_with_no_cards",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV7",
+   "why": "a seat that is not named still reads a status line",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "            .and_then(|s| seat_item(root, s))",
+   "new": "            .and_then(|s| seat_item(root, s)).or(seat_item(root, \"a9136\")) // knife",
+   "test": "a_seat_that_is_not_named_is_null_with_no_cards",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV8",
+   "why": "a seat that is not 5 hex (a Windows-shaped path) is taken as a seat",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "        let seat = seat.map(str::trim).filter(|s| seat_code(s));",
+   "new": "        let seat = seat.map(str::trim).filter(|s| !s.is_empty()); // knife",
+   "test": "only_five_hex_is_a_seat_unix_or_windows_shaped",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV9",
+   "why": "a control character stays in a status line",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "        c.is_control()",
+   "new": "        c == char::MAX // knife",
+   "test": "a_status_line_loses_hidden_marks_and_is_cut",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV10",
+   "why": "a direction mark stays in a status line",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "                0xAD | 0x61C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E",
+   "new": "                0xAD | 0x61C | 0x180E | 0x200B..=0x200F // knife",
+   "test": "a_status_line_loses_hidden_marks_and_is_cut",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV11",
+   "why": "a host with a colon splits the id into more fields",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "        Some(h) => format!(\"{}:{ms}:{pid}:{seq}\", h.replace(':', \"_\")),",
+   "new": "        Some(h) => format!(\"{h}:{ms}:{pid}:{seq}\"), // knife",
+   "test": "a_host_with_a_colon_still_makes_a_four_field_id",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-EV12",
+   "why": "the status line read from seat-now is kept as written",
+   "file": "crates/skipstop-ledger/src/events.rs",
+   "old": "            .map(|i| clean_text(&i));",
+   "new": "            .map(|i| i.trim().to_owned()); // knife",
+   "test": "a_loaded_status_line_is_cleaned_and_its_cards_still_found",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked"
+   ]
+  },
+  {
+   "id": "ledger-TS1",
+   "why": "an observe-mode saving (a prediction that stopped nothing) is added to the totals",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "        if !one.real {",
+   "new": "        if !one.real && false { // knife",
+   "test": "confirmed_and_estimated_are_apart_and_observe_mode_is_in_no_total",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS2",
+   "why": "an estimate nobody checked is added to the confirmed number",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                if one.confirmed {",
+   "new": "                if one.confirmed || true { // knife",
+   "test": "confirmed_and_estimated_are_apart_and_observe_mode_is_in_no_total",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS3",
+   "why": "a saving that was a wrong block stays in the total",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "        if one.wrong {",
+   "new": "        if one.wrong && false { // knife",
+   "test": "a_checked_estimate_becomes_confirmed_and_a_wrong_block_is_taken_out_with_its_penalty",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS4",
+   "why": "a checked estimate stays an estimate",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "            None if !one.confirmed => one.confirmed = true,",
+   "new": "            None if !one.confirmed => one.confirmed = false, // knife",
+   "test": "a_checked_estimate_becomes_confirmed_and_a_wrong_block_is_taken_out_with_its_penalty",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS5",
+   "why": "a verdict of the other system is written (a gate that \"reuses\")",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "    if !verdict_fits(s.system, s.verdict) {",
+   "new": "    if !verdict_fits(s.system, s.verdict) && false { // knife",
+   "test": "a_saving_says_which_system_what_it_avoided_and_where_its_number_comes_from",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS6",
+   "why": "a saving is written without where its number comes from",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "        return Err(\"basis is empty: a saving says where its number comes from\".into());",
+   "new": "        let _ = (); // knife: written anyway",
+   "test": "a_saving_says_which_system_what_it_avoided_and_where_its_number_comes_from",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS7",
+   "why": "the same id twice is taken as two events (the second replaces the first without a word)",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                Some((id, one)) if one.at <= latest && !saved.contains_key(&id) => {",
+   "new": "                Some((id, one)) if one.at <= latest => { // knife",
+   "test": "what_cannot_be_read_is_counted_and_never_added",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS8",
+   "why": "a saving whose fields do not fit is read anyway (no basis)",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "    str_of(o, \"basis\").filter(|s| !s.trim().is_empty())?;",
+   "new": "    str_of(o, \"basis\")?; // knife: any basis",
+   "test": "what_cannot_be_read_is_counted_and_never_added",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS9",
+   "why": "the week starts on Sunday",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "    let week = day - (day + 3).rem_euclid(7);",
+   "new": "    let week = day - (day + 4).rem_euclid(7); // knife",
+   "test": "a_box_holds_what_happened_in_it_and_the_week_starts_on_monday_on_the_callers_clock",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS10",
+   "why": "the day is UTC'\"'\"'s whatever clock the caller gave",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "    let local = now_ms.saturating_add(off);",
+   "new": "    let local = now_ms; // knife",
+   "test": "a_box_holds_what_happened_in_it_and_the_week_starts_on_monday_on_the_callers_clock",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS11",
+   "why": "a line that is not JSON is dropped without being counted",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                    _ => bad += 1,",
+   "new": "                    _ => {} // knife: not counted",
+   "test": "the_summary_is_read_from_every_programs_month_files_and_a_broken_line_is_counted",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS12",
+   "why": "a unit'\"'\"'s time is written without its machine",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "    if runner.is_empty() {",
+   "new": "    if runner.is_empty() && false { // knife",
+   "test": "a_units_time_says_which_machine_and_how_big",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS13",
+   "why": "a confirm that is not a whole event (no id, no time) still turns an estimate into a fact",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                Some((r, at)) if at <= latest => marks.push((r, None)),",
+   "new": "                _ if str_of(o, \"ref\").is_some() => marks.push((str_of(o, \"ref\").unwrap_or(\"\").to_string(), None)), // knife",
+   "test": "a_confirm_or_a_wrong_that_is_not_a_whole_event_changes_nothing",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS14",
+   "why": "a saving dated next year is in today'\"'\"'s box",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "    let latest = now_ms.saturating_add(FUTURE_SLACK_MS);",
+   "new": "    let latest = i64::MAX; // knife: any time",
+   "test": "an_event_dated_after_the_readers_clock_is_in_no_box",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS15",
+   "why": "a wrong block that had been checked before is not taken out",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "            Some((at, p)) if !one.wrong => {",
+   "new": "            Some((at, p)) if !one.wrong && !one.confirmed => { // knife",
+   "test": "a_saving_that_was_checked_can_still_be_found_wrong",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS16",
+   "why": "an events folder that is there and cannot be read looks like a program with no events",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,",
+   "new": "            Err(_) if true => continue, // knife",
+   "test": "a_folder_that_is_there_and_cannot_be_read_is_counted",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS17",
+   "why": "an event that lost a common field (its outcome, its host, …) is read as whole",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "    str_of(o, \"outcome\").filter(|s| !s.is_empty())?;",
+   "new": "    let _ = str_of(o, \"outcome\"); // knife: not needed",
+   "test": "a_confirm_or_a_wrong_that_is_not_a_whole_event_changes_nothing",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-TS18",
+   "why": "a confirm dated next year turns an estimate into a fact today",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                Some((r, at)) if at <= latest => marks.push((r, None)),",
+   "new": "                Some((r, _)) => marks.push((r, None)), // knife: any time",
+   "test": "an_event_dated_after_the_readers_clock_is_in_no_box",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  }
+ ]
+}

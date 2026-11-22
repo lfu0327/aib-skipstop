@@ -42,3 +42,12 @@ jobs:
       - name: test
         shell: bash
         run: cargo test --workspace --locked
+      # Every knife's anchor is in its file exactly once (cheap, on every system); the knives
+      # themselves run on Linux: each takes one rule away and its own test has to fail.
+      - name: knife anchors
+        shell: bash
+        run: cargo run -q --release --locked -p skipstop-knife -- check
+      - name: knives
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ./target/release/skipstop-knife run

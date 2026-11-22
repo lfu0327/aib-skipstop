@@ -1,0 +1,255 @@
+{
+ "knives": [
+  {
+   "id": "audit-TA1",
+   "why": "(§7 1) a different outcome alone is not a mismatch",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "    if audit.outcome != source.outcome",
+   "new": "    if false",
+   "test": "compare_names_what_differs",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA2",
+   "why": "(§7 1) a revoked unit is reused again",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "        (\"unit\", ask.unit),",
+   "new": "        (\"unit\", \"\"), // knife",
+   "test": "a_forged_source_is_a_mismatch_and_the_unit_is_revoked",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA3",
+   "why": "(§7 2) every source under the rule version is suspected, not only the same invocation's",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "                && s.invocation_id == bad.invocation_id",
+   "new": "                && !s.invocation_id.is_empty() // knife",
+   "test": "sources_written_beside_a_bad_one_are_suspect_until_lifted",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA4",
+   "why": "(§7 3) a retry after a red counts as flaky evidence",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "    for r in runs.iter().filter(|r| !r.retry_after_red) {",
+   "new": "    for r in runs.iter().filter(|r| !r.retry_after_red || true) { // knife",
+   "test": "flaky_needs_both_results_on_the_same_key_and_environment",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA5",
+   "why": "(§7 4) a side effect is reusable",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "    if d.side_effect {",
+   "new": "    if d.side_effect && false { // knife",
+   "test": "each_never_reuse_class_is_named_and_reads_back",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA6",
+   "why": "(§7 5) a round exactly one period old is not due",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "    if age >= period_days * DAY {",
+   "new": "    if age > period_days * DAY { // knife",
+   "test": "the_defense_round_is_due_when_overdue_first_or_after_a_change",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA7",
+   "why": "(§7 6) the defense round reports what matched and hides what did not",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "            (c != Compare::Same).then(|| (unit.clone(), c))",
+   "new": "            (c == Compare::Same).then(|| (unit.clone(), c)) // knife",
+   "test": "the_defense_round_finds_a_unit_that_would_have_reused_a_stale_result",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA8",
+   "why": "(§7 7) the draw ignores the seed, so the ledger's seed cannot redraw it",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "    let x = mix(seed ^ fnv(unit));",
+   "new": "    let x = mix(seed.wrapping_mul(0) ^ fnv(unit)); // knife",
+   "test": "the_same_seed_draws_the_same_audits",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA9",
+   "why": "(§7 8) an unreadable table allows every reuse",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "        Err(why) => return Some(format!(\"run_source_revoked:table_unreadable:{why}\")),",
+   "new": "        Err(_why) => return None, // knife",
+   "test": "a_broken_table_refuses_every_reuse",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA10",
+   "why": "(§7 9) a kind audited far below the others is not forced",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "        Some((x, y)) if *y > 0 => (*x as f64 / *y as f64) < overall / 2.0,",
+   "new": "        Some((x, y)) if *y > 0 => (*x as f64 / *y as f64) < overall / 200.0, // knife",
+   "test": "forced_audits_cover_streaks_age_rare_kinds_and_unfinished_audits",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-TA11",
+   "why": "(5d33a f6c37623 M1) a forced unit skips the random draw, so the sample misses the units reused longest",
+   "file": "crates/skipstop-audit/src/lib.rs",
+   "old": "    if draw(seed, unit) < p {",
+   "new": "    if forced.is_empty() && draw(seed, unit) < p { // knife",
+   "test": "a_forced_unit_can_still_be_drawn_into_the_random_sample",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--test",
+    "audit"
+   ]
+  },
+  {
+   "id": "audit-EL1",
+   "why": "a right run that differs from the source passes as an ordinary run (no spot check, exit 0)",
+   "file": "crates/skipstop-audit/src/engine.rs",
+   "old": "            Compare::Mismatch => Unit::SpotCheckDiffers,",
+   "new": "            Compare::Mismatch => ran(true), // knife",
+   "test": "a_right_run_that_differs_from_the_source_is_a_spot_check_and_revokes",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "audit-EL2",
+   "why": "a wrong real run is only a spot check when it differs (the failure is hidden behind exit 6)",
+   "file": "crates/skipstop-audit/src/engine.rs",
+   "old": "        _ if !met => Some(ran(false)),",
+   "new": "        _ if !met && false => Some(ran(false)), // knife",
+   "test": "a_wrong_real_run_is_a_failure_whatever_the_source_said",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "audit-EL3",
+   "why": "a mismatch does not revoke the source",
+   "file": "crates/skipstop-audit/src/engine.rs",
+   "old": "    let revoke = c == Compare::Mismatch;",
+   "new": "    let revoke = c == Compare::Mismatch && false; // knife",
+   "test": "a_right_run_that_differs_from_the_source_is_a_spot_check_and_revokes",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "audit-EL4",
+   "why": "a run cut off reads as met",
+   "file": "crates/skipstop-audit/src/engine.rs",
+   "old": "        _ if audit.censored || !audit.outcome.finished() => Some(ran(false)),",
+   "new": "        _ if audit.censored && false => Some(ran(false)), // knife",
+   "test": "a_run_cut_off_is_not_met_a_time_out_is_its_own_and_a_cancel_is_the_runs",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-audit",
+    "--locked",
+    "--lib"
+   ]
+  }
+ ]
+}

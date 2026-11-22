@@ -1,0 +1,79 @@
+{
+ "knives": [
+  {
+   "id": "knife-KN1",
+   "why": "a knife bites whenever the command fails, whichever test failed (a knife that does not compile would bite)",
+   "file": "crates/skipstop-knife/src/lib.rs",
+   "old": "    if !ok && failed.iter().any(|t| t.contains(test)) {",
+   "new": "    if !ok && (failed.iter().any(|t| t.contains(test)) || true) {",
+   "test": "a_knife_bites_only_when_the_command_fails_and_names_its_own_test",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-knife",
+    "--locked"
+   ]
+  },
+  {
+   "id": "knife-KN2",
+   "why": "a knife bites though the command passed",
+   "file": "crates/skipstop-knife/src/lib.rs",
+   "old": "    if !ok && failed.iter().any(|t| t.contains(test)) {",
+   "new": "    if (!ok || true) && failed.iter().any(|t| t.contains(test)) {",
+   "test": "a_knife_bites_only_when_the_command_fails_and_names_its_own_test",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-knife",
+    "--locked"
+   ]
+  },
+  {
+   "id": "knife-KN3",
+   "why": "an anchor that is in the file twice is cut at its first place",
+   "file": "crates/skipstop-knife/src/lib.rs",
+   "old": "    if found != 1 {\n        return Ok(Verdict::Invalid { found });",
+   "new": "    if found == 0 {\n        return Ok(Verdict::Invalid { found });",
+   "test": "an_anchor_that_is_not_there_once_changes_nothing",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-knife",
+    "--locked"
+   ]
+  },
+  {
+   "id": "knife-KN4",
+   "why": "a knife file with the same id twice is read (one knife would hide the other's verdict)",
+   "file": "crates/skipstop-knife/src/lib.rs",
+   "old": "        if !seen.insert(knife.id.clone()) {",
+   "new": "        if !seen.insert(knife.id.clone()) && false {",
+   "test": "a_knife_file_needs_every_field_and_an_id_once",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-knife",
+    "--locked"
+   ]
+  },
+  {
+   "id": "knife-KN5",
+   "why": "what a killed run left knifed is not put back",
+   "file": "crates/skipstop-knife/src/lib.rs",
+   "old": "        if std::fs::write(root.join(&rel), text).is_ok() && std::fs::remove_file(&p).is_ok() {",
+   "new": "        if std::fs::remove_file(&p).is_ok() && rel.is_empty() == text.is_empty() {",
+   "test": "a_killed_runs_knifed_file_is_put_back_by_the_next_run",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-knife",
+    "--locked"
+   ]
+  }
+ ]
+}
