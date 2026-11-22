@@ -74,6 +74,10 @@ no audit picked the unit this time. Otherwise it runs:
 
 A failure is never a source: a red unit runs again until it is green.
 
+Two more things run a unit whatever its key: a ledger file that cannot be read whole (it may
+hold a newer failure or a revocation: nothing is reused until the file named in the output is
+dealt with), and a unit whose same key has both passed and failed before on this kind of machine.
+
 The mode is the first of these that says: `--mode`, the variable `AIB_SKIPSTOP_MODE`, the state
 folder's mode (`aib-skipstop mode real`), else observe. A word that is not a mode is an error
 wherever it stands. When a source is revoked, what earlier runs had saved by reusing it is taken
