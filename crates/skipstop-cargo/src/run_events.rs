@@ -74,6 +74,7 @@ pub fn observe(ctx: &Ctx, runner: &str, head: &str, units: &[Ran<'_>], at_ms: i6
             ),
             real: false,
             head: Some(head).filter(|h| !h.is_empty()),
+            of: Some((u.unit, w.from)),
         };
         if let Ok(v) = timesave::saved(ctx, &saved, at_ms) {
             out.push(v);
@@ -116,12 +117,27 @@ pub fn real(ctx: &Ctx, runner: &str, head: &str, units: &[Ran<'_>], at_ms: i64) 
             basis: &format!("the unit's own time in the run it was reused from ({from})"),
             real: true,
             head: Some(head).filter(|h| !h.is_empty()),
+            of: Some((u.unit, from)),
         };
         if let Ok(v) = timesave::saved(ctx, &saved, at_ms) {
             out.push(v);
         }
     }
     out
+}
+
+/// The `time_saved_wrong` events for a source that a real run has just disagreed with: one for
+/// each real saving that stands on `unit` reused from `from` and was not taken back before.
+/// Each takes back exactly what that saving claimed.
+pub fn take_back(ctx: &Ctx, evs: &[Value], unit: &str, from: &str, at_ms: i64) -> Vec<Value> {
+    timesave::standing_on(evs, unit, from)
+        .into_iter()
+        .filter_map(|(id, ms)| {
+            let basis =
+                format!("its source {from} was revoked: a real run of {unit} disagreed with it");
+            timesave::wrong(ctx, &id, ms, &basis, at_ms).ok()
+        })
+        .collect()
 }
 
 fn clock(ms: u64) -> String {
@@ -269,7 +285,8 @@ mod tests {
             vec![
                 ("unit_time", "plain"),
                 ("unit_time", "reused"),
-                ("time_saved", ""),
+                // the saving names its unit and source too, so it can be found again
+                ("time_saved", "reused"),
                 ("unit_time", "differs"),
                 ("unit_time", "no-time"),
             ]
@@ -305,6 +322,7 @@ mod tests {
             basis: "measured",
             real,
             head: None,
+            of: None,
         };
         let evs = vec![
             timesave::saved(&ctx(), &gate(3_725_000, true, true), AT).unwrap(),
@@ -377,6 +395,60 @@ mod tests {
         let sum = timesave::summarize(&evs, AT, 0);
         assert_eq!(sum.all.shadow.confirmed_ms, 900);
         assert_eq!((sum.all.shadow.count, sum.observed, sum.bad), (1, 0, 0));
+    }
+
+    #[test]
+    fn a_revoked_source_takes_back_every_saving_that_stood_on_it_once() {
+        let reused = |unit, from| Ran {
+            reused: true,
+            would: Some(Would {
+                from,
+                source_ms: Some(900),
+                agreed: true,
+            }),
+            ..ran(unit, None)
+        };
+        // two runs reused b from tr-1, one reused b from tr-2, one reused a from tr-1
+        let mut evs = real(
+            &ctx(),
+            "m",
+            "h",
+            &[reused("b", "repo/tr-1"), reused("a", "repo/tr-1")],
+            AT,
+        );
+        evs.extend(real(&ctx(), "m", "h", &[reused("b", "repo/tr-1")], AT + 1));
+        evs.extend(real(&ctx(), "m", "h", &[reused("b", "repo/tr-2")], AT + 2));
+        // an observe-mode prediction about the same unit and source saved nothing to take back
+        let seen = ran(
+            "b",
+            Some(Would {
+                from: "repo/tr-1",
+                source_ms: Some(900),
+                agreed: true,
+            }),
+        );
+        evs.extend(observe(&ctx(), "m", "h", &[seen], AT + 3));
+        assert_eq!(
+            timesave::summarize(&evs, AT + 9, 0).all.shadow.confirmed_ms,
+            3_600
+        );
+
+        let back = take_back(&ctx(), &evs, "b", "repo/tr-1", AT + 4);
+        assert_eq!(back.len(), 2, "{back:?}");
+        assert!(back
+            .iter()
+            .all(|w| w["kind"] == "time_saved_wrong" && w["penalty_ms"] == 900));
+        assert!(back[0]["basis"].as_str().unwrap().contains("repo/tr-1"));
+        evs.extend(back);
+        let s = timesave::summarize(&evs, AT + 9, 0);
+        // b from tr-1 twice is gone; a from tr-1 and b from tr-2 stand
+        assert_eq!(
+            (s.all.shadow.confirmed_ms, s.all.shadow.penalty_ms),
+            (1_800, 1_800)
+        );
+        assert_eq!((s.all.shadow.count, s.bad), (2, 0));
+        // asked again: nothing is taken back twice
+        assert!(take_back(&ctx(), &evs, "b", "repo/tr-1", AT + 5).is_empty());
     }
 
     #[test]

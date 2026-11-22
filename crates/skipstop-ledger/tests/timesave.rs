@@ -33,6 +33,7 @@ fn gate(saved_ms: u64, confirmed: bool, real: bool) -> Saved<'static> {
         basis: "median of this machine's last 7 days of the same receipt",
         real,
         head: Some("351c5694c7"),
+        of: None,
     }
 }
 
@@ -47,6 +48,7 @@ fn reuse(saved_ms: u64) -> Saved<'static> {
         basis: "the source run's own time",
         real: true,
         head: None,
+        of: None,
     }
 }
 

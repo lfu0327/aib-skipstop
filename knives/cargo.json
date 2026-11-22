@@ -325,23 +325,6 @@
    ]
   },
   {
-   "id": "cargo-RM4",
-   "why": "a word that is not a mode is read as observe",
-   "file": "crates/skipstop-cargo/src/main.rs",
-   "old": "        Some(other) => Err(format!(\"mode {other:?}: not observe or real\")),",
-   "new": "        Some(_) => Ok(false),",
-   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
-   "cmd": [
-    "cargo",
-    "test",
-    "-p",
-    "skipstop-cargo",
-    "--locked",
-    "--test",
-    "real_mode"
-   ]
-  },
-  {
    "id": "cargo-RM5",
    "why": "a real run that disagrees with its source leaves the source standing",
    "file": "crates/skipstop-cargo/src/main.rs",
@@ -437,6 +420,188 @@
     "--locked",
     "--test",
     "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-TB1",
+   "why": "a saving already taken back is taken back again (the penalty is counted twice)",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "        .filter(|(id, _)| !taken.contains(id))",
+   "new": "        .filter(|(id, _)| !taken.contains(id) || true)",
+   "test": "a_revoked_source_takes_back_every_saving_that_stood_on_it_once",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TB2",
+   "why": "an observe-mode prediction is taken back as if it had saved something",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "        .filter(|o| str_of(o, \"kind\") == Some(KIND_SAVED) && str_of(o, \"mode\") == Some(\"real\"))",
+   "new": "        .filter(|o| str_of(o, \"kind\") == Some(KIND_SAVED))",
+   "test": "a_revoked_source_takes_back_every_saving_that_stood_on_it_once",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TB3",
+   "why": "every saving of the unit is taken back, whichever run it was reused from",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "        .filter(|o| str_of(o, \"unit\") == Some(unit) && str_of(o, \"from\") == Some(from))",
+   "new": "        .filter(|o| str_of(o, \"unit\") == Some(unit) && !from.is_empty())",
+   "test": "a_revoked_source_takes_back_every_saving_that_stood_on_it_once",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TB4",
+   "why": "another unit reused from the same run is taken back too",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "        .filter(|o| str_of(o, \"unit\") == Some(unit) && str_of(o, \"from\") == Some(from))",
+   "new": "        .filter(|o| str_of(o, \"from\") == Some(from) && !unit.is_empty())",
+   "test": "a_revoked_source_takes_back_every_saving_that_stood_on_it_once",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TB5",
+   "why": "a revoked source's savings stay in the total: nothing is written to take them back",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    for ev in evs.into_iter().chain(taken_back) {",
+   "new": "    for ev in evs.into_iter().chain(taken_back.into_iter().take(0)) {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-MD1",
+   "why": "--mode on the command line loses to the variable and the file",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if let Some(r) = flag {",
+   "new": "    if let Some(r) = flag.filter(|_| false) {",
+   "test": "the_mode_is_the_first_that_says_and_a_word_that_is_no_mode_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-MD2",
+   "why": "the variable is not read: the file's mode runs",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if let Some(r) = env {",
+   "new": "    if let Some(r) = env.filter(|_| false) {",
+   "test": "the_mode_is_the_first_that_says_and_a_word_that_is_no_mode_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-MD3",
+   "why": "a word that is not a mode is read as observe",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        other => Err(format!(\"mode {other:?}: not observe or real\")),",
+   "new": "        _ => Ok(false),",
+   "test": "the_mode_is_the_first_that_says_and_a_word_that_is_no_mode_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-MD4",
+   "why": "a typo in the mode file is let through when the flag or the variable would win anyway",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        .map(|w| mode_word(w).map_err(|e| format!(\"the mode file: {e}\")))\n        .transpose()?;",
+   "new": "        .map(|w| mode_word(w).map_err(|e| format!(\"the mode file: {e}\")))\n        .and_then(Result::ok);",
+   "test": "the_mode_is_the_first_that_says_and_a_word_that_is_no_mode_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-MD5",
+   "why": "a typo in the variable is let through when the flag would win anyway",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        .map(|w| mode_word(w).map_err(|e| format!(\"AIB_SKIPSTOP_MODE: {e}\")))\n        .transpose()?;",
+   "new": "        .map(|w| mode_word(w).map_err(|e| format!(\"AIB_SKIPSTOP_MODE: {e}\")))\n        .and_then(Result::ok);",
+   "test": "the_mode_is_the_first_that_says_and_a_word_that_is_no_mode_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-RS1",
+   "why": "a source that was compared and found the same is taken as revoked: good savings are taken back",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        .filter(|(_, u)| u.audit.as_ref().is_some_and(|a| a.revoke))",
+   "new": "        .filter(|(_, u)| u.audit.is_some())",
+   "test": "the_revoked_sources_are_read_back_from_the_ledger_each_once",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
    ]
   }
  ]
