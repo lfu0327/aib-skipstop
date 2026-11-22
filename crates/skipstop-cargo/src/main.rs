@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]\n       aib-skipstop stop [--config <file>] [--mode observe|real] [--no-stop] [--state <dir>] (check | -- <command>...)";
+const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--plan] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]\n       aib-skipstop stop [--config <file>] [--mode observe|real] [--no-stop] [--state <dir>] (check | -- <command>...)";
 
 struct Args {
     packages: Vec<String>,
@@ -41,6 +41,8 @@ struct Args {
     mode_cmd: Option<Option<String>>,
     /// run every unit this time, whatever the ledger says
     fresh: bool,
+    /// work out the keys and say what a run would do with each unit; run nothing, write nothing
+    plan_only: bool,
     /// minutes the caller's clock is ahead of UTC (days, weeks, months start on it)
     utc_offset: i32,
 }
@@ -57,6 +59,7 @@ fn args() -> Result<Args, String> {
         mode_flag: None,
         mode_cmd: None,
         fresh: false,
+        plan_only: false,
         utc_offset: 0,
     };
     let mut it = std::env::args().skip(1);
@@ -79,6 +82,7 @@ fn args() -> Result<Args, String> {
                 a.mode_cmd = Some(Some(w.to_string()))
             }
             "--fresh" => a.fresh = true,
+            "--plan" => a.plan_only = true,
             "saved" if !a.saved && a.packages.is_empty() => a.saved = true,
             "--utc-offset" => {
                 let v = it.next().ok_or("--utc-offset needs minutes")?;
@@ -392,6 +396,7 @@ fn run(a: &Args) -> Result<Exit, String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "local".to_string());
+    let plan_started = now_ms();
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = key::repo_root(&cwd).map_err(|e| format!("{e:?}"))?;
     let meta = cargo(
@@ -505,6 +510,43 @@ fn run(a: &Args) -> Result<Exit, String> {
                 why: "defense_round",
             }
     });
+
+    if a.plan_only {
+        // what a run would do, and how long it took to know: nothing runs, nothing is written
+        let took_ms = now_ms() - plan_started;
+        let would_run = rows.iter().filter(|r| r.plan.runs()).count();
+        if a.json {
+            let units: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!({"unit": r.unit, "plan": r.plan.word(), "key": r.key,
+                        "unmeasurable": r.unmeasurable})
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::json!({"plan_only": true, "mode": if a.real { "real" } else { "observe" },
+                    "units": units, "would_run": would_run, "decided_in_ms": took_ms,
+                    "ledger_problems": problems})
+            );
+        } else {
+            for r in &rows {
+                println!("  {:<28} [{}]", r.unit, r.plan.word());
+            }
+            for p in &problems {
+                println!("  ledger: {p}");
+            }
+            println!(
+                "aib-skipstop --plan ({}): {} units, {} would run, {} would be reused; decided in {} ms; nothing was run",
+                if a.real { "real" } else { "observe" },
+                rows.len(),
+                would_run,
+                rows.len() - would_run,
+                took_ms
+            );
+        }
+        return Ok(Exit::Ok);
+    }
 
     // one nextest for every unit that runs (observe mode: all of them)
     std::fs::create_dir_all(&state).map_err(|e| e.to_string())?;

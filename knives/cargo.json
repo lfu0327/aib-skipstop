@@ -685,6 +685,23 @@
     "--test",
     "real_mode"
    ]
+  },
+  {
+   "id": "cargo-PL1",
+   "why": "--plan runs the units and writes the ledger like any run",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if a.plan_only {",
+   "new": "    if a.plan_only && false {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
   }
  ]
 }

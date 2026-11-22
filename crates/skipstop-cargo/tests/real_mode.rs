@@ -89,6 +89,12 @@ fn quiet_seed() -> String {
         .to_string()
 }
 
+/// The one repo's folder in the ledger of the default state folder.
+fn repo_ledger(t: &Tmp) -> PathBuf {
+    let dir = t.0.join("state/ledger");
+    fs::read_dir(dir).unwrap().flatten().next().unwrap().path()
+}
+
 struct Out {
     rc: i32,
     json: serde_json::Value,
@@ -257,6 +263,18 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
     assert_eq!(r.rc, 0, "{}", r.json);
     assert_eq!((r.plan("a"), r.plan("b")), ("reuse".into(), "reuse".into()));
     assert_eq!(r.plan("c"), "run:defense_round", "{}", r.json);
+
+    // --plan says what a run would do and does none of it: no test case, no ledger line
+    let streams_before = fs::read_dir(repo_ledger(&t)).unwrap().count();
+    let r = run(&t, &["--mode", "real", "--plan"]);
+    assert_eq!(r.rc, 0, "{}", r.json);
+    assert_eq!(r.json["plan_only"], true);
+    assert_eq!(r.json["would_run"], 0, "nothing changed: {}", r.json);
+    assert!(r.json["decided_in_ms"].as_i64().is_some_and(|ms| ms >= 0));
+    assert_eq!(
+        fs::read_dir(repo_ledger(&t)).unwrap().count(),
+        streams_before
+    );
 
     // --fresh runs everything whatever the ledger says
     let r = run(&t, &["--mode", "real", "--fresh"]);
