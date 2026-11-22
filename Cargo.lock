@@ -238,6 +238,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "skipstop-knife"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "skipstop-ledger"
 version = "0.1.0"
 dependencies = [

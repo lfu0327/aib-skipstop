@@ -1,0 +1,198 @@
+{
+ "knives": [
+  {
+   "id": "cargo-SR1",
+   "why": "EZ2_AIB_STATE_ROOT is not read",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    let aib = if let Some(r) = env_root.filter(|r| !r.is_empty()) {",
+   "new": "    let aib = if let Some(r) = env_root.filter(|_| false) { // knife",
+   "test": "the_ledger_follows_the_aib_state_root_like_aib_drive",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-SR2",
+   "why": "an empty EZ2_AIB_HOME counts as set",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    } else if let Some(h) = aib_home.filter(|h| !h.is_empty()) {",
+   "new": "    } else if let Some(h) = aib_home { // knife",
+   "test": "the_ledger_follows_the_aib_state_root_like_aib_drive",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-SR3",
+   "why": "--state is not taken as given",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        return s.to_path_buf();",
+   "new": "        let _ = s; // knife",
+   "test": "the_ledger_follows_the_aib_state_root_like_aib_drive",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-N1",
+   "why": "a picked test with no result counts as a pass",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "    let met = !bad && missing.is_empty() && unexpected.is_empty() && ran > 0;",
+   "new": "    let met = !bad && unexpected.is_empty() && ran > 0; // knife",
+   "test": "a_picked_test_with_no_result_is_not_a_pass",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-N2",
+   "why": "a result the list did not pick is let through",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "                unexpected.push(k);",
+   "new": "                unexpected.truncate(0); let _ = k; // knife",
+   "test": "a_result_the_list_did_not_pick_means_they_disagree",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-N3",
+   "why": "a flaky pass reads as a pass",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "        } else if body.contains(\"<flakyFailure\") || body.contains(\"<flakyError\") {",
+   "new": "        } else if body.contains(\"<never-a-tag\") { // knife",
+   "test": "a_failure_or_a_flaky_pass_is_not_met",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-N4",
+   "why": "a binary left out whole is dropped without a name",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "                out.skipped_binaries.push(id.clone());",
+   "new": "                let _ = id; // knife",
+   "test": "a_binary_left_out_whole_is_named_and_an_unknown_status_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-N7",
+   "why": "nothing run reads as met",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "    let met = !bad && missing.is_empty() && unexpected.is_empty() && ran > 0;",
+   "new": "    let met = !bad && missing.is_empty() && unexpected.is_empty(); // knife",
+   "test": "nothing_picked_and_nothing_run_is_not_met",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-N8",
+   "why": "the list leaves the aib profile out",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "        \"--profile\",",
+   "new": "        \"--profile-was-here\", // knife",
+   "test": "the_run_uses_the_aib_profile_and_the_list_the_same_selection",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-N5",
+   "why": "a partition counts as the user's own filter",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "            LeftOut::Partition | LeftOut::DefaultFilter | LeftOut::Other(_) => {",
+   "new": "            LeftOut::Partition => Some(SkipWhy::UserFilter), LeftOut::DefaultFilter | LeftOut::Other(_) => { // knife",
+   "test": "a_partition_or_default_filter_is_not_the_users_choice",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-N6",
+   "why": "the run retries (a second-try pass hides a failure)",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "retries = 0",
+   "new": "retries = 2",
+   "test": "the_run_uses_the_aib_profile_and_the_list_the_same_selection",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-test-cargo-9",
+   "why": "TC-junit (11-23): the JUnit path goes into the config relative, so nextest puts it under its own store folder and a moved build folder (CARGO_TARGET_DIR) hides the result again",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "    if !junit.is_absolute() {",
+   "new": "    if false { // knife: any path",
+   "test": "the_junit_file_is_named_absolute_so_a_moved_build_folder_does_not_hide_it",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked"
+   ]
+  }
+ ]
+}

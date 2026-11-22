@@ -66,6 +66,18 @@ The ledger goes under the AIB state root (`--state <dir>`, else `EZ2_AIB_STATE_R
 
 Rust only. macOS, Windows and Linux are checked on every change.
 
+## Knives
+
+A test that still passes with its rule taken away guards nothing. `knives/*.json` lists, for each
+rule, the line to break and the test that then has to fail; `skipstop-knife` (a crate here, no
+script and no other language) puts the break in, runs the test, puts the line back, and is red
+unless that very test failed.
+
+```sh
+cargo run --release -p skipstop-knife -- check     # every anchor is in its file exactly once
+cargo run --release -p skipstop-knife -- run       # all of them, about a minute
+```
+
 ## 中文
 
 **aib-skipstop** 是 AIB 的獨立開源外掛,做兩件省時間的事:
