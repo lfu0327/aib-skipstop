@@ -154,8 +154,10 @@ pub fn offset_text(min: i32) -> String {
 /// The five boxes as lines for a person: confirmed large, estimated and penalty beside it and
 /// never added in, the two systems apart, and what stands outside every box said last.
 pub fn saved_text(s: &timesave::Summary, offset_min: i32) -> String {
+    // said first, so the numbers are not read as time on the clock
     let mut out = format!(
-        "time saved (days on a UTC{} clock)\n",
+        "time saved, as the skipped work's own run time added up (units run side by side, so it is \
+         more than the clock would show); days on a UTC{} clock\n",
         offset_text(offset_min)
     );
     for (name, p) in [
@@ -206,6 +208,8 @@ pub fn saved_json(s: &timesave::Summary, offset_min: i32) -> Value {
     let period = |p: &timesave::Period| serde_json::json!({ "total": sum(&p.total()), "skip": sum(&p.shadow), "stop": sum(&p.precheck) });
     serde_json::json!({
         "v": 1,
+        // what the milliseconds are: not time on the clock
+        "measure": "unit_time_sum",
         "utc_offset_min": offset_min,
         "today": period(&s.today), "week": period(&s.week), "month": period(&s.month),
         "year": period(&s.year), "all": period(&s.all),
@@ -333,7 +337,11 @@ mod tests {
         let s = timesave::summarize(&evs, AT, 480);
         let text = saved_text(&s, 480);
         assert!(
-            text.starts_with("time saved (days on a UTC+08:00 clock)\n"),
+            text.starts_with("time saved, as the skipped work's own run time added up")
+                && text
+                    .lines()
+                    .next()
+                    .is_some_and(|l| l.ends_with("days on a UTC+08:00 clock")),
             "{text}"
         );
         // 1:02:05 confirmed; the estimate (0:01:00) and the prediction are not in it
@@ -345,6 +353,7 @@ mod tests {
         assert!(text.contains("1 more line(s) could not be read"), "{text}");
         let j = saved_json(&s, 480);
         assert_eq!(j["today"]["total"]["confirmed_ms"], 3_725_000);
+        assert_eq!(j["measure"], "unit_time_sum");
         assert_eq!(j["today"]["total"]["estimated_ms"], 60_000);
         assert_eq!(j["all"]["stop"]["count"], 2);
         assert_eq!(j["all"]["skip"]["confirmed_ms"], 0);

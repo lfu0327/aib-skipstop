@@ -57,6 +57,11 @@ aib-skipstop saved --utc-offset 480      # the five boxes, days on a UTC+08:00 c
 In observe mode every box stays 0 and the predictions are counted beside: a unit that ran anyway
 saved nothing.
 
+What the numbers are: for a skipped unit, the time its own tests took in the run it was reused
+from, added up. Tests run side by side, so this is more than the time saved on the clock (on a
+14-package run here: 35 s on the clock, about three times that as unit time). The output says
+so in its first line, and the JSON as `"measure": "unit_time_sum"`.
+
 ### Real mode
 
 ```sh
