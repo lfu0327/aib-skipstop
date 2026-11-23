@@ -554,6 +554,7 @@ mod tests {
         ));
         evs.extend(take_back(&ctx(), &evs, "rev", "repo/tr-rev", AT + 41_000));
         // precheck (stop) estimated -> confirmed
+        let is_real = true;
         let stop_est = timesave::saved(
             &ctx(),
             &timesave::Saved {
@@ -564,7 +565,7 @@ mod tests {
                 saved_ms: 4_000,
                 confirmed: false,
                 basis: "guess",
-                real: true,
+                real: is_real,
                 head: Some("abc"),
                 of: Some(("check1", "stop")),
             },
