@@ -9,7 +9,7 @@ Two ways to stop a test run from wasting time, as an independent open-source AIB
 Both write what they saved into one book, so a page can show it: confirmed and estimated apart,
 a wrong block or a wrong reuse taken back out.
 
-## Where it stands (0.1.0)
+## Where it stands (0.2.0)
 
 Said plainly, because a tool that reuses results has to earn trust:
 
@@ -183,7 +183,7 @@ cargo run --release -p skipstop-knife -- run       # all of them, about a minute
 - **Skip(影子續跑)**:輸入沒變的測試單位不重跑,沿用上次真跑的結果,並說得出沿用自哪一次。
 - **Stop(預檢省時)**:一定會失敗的工作,在花大錢之前先擋下。
 
-**現況(0.1.0)要講清楚**:預設是「觀察模式」——每個單位都真跑,只在帳上記下「這次本來可以沿用哪一次、結果是否相同」。真沿用已經做好,要加 `--mode real` 才會啟用(有隨機與強制抽查、每週一次全跑的防守輪、`--fresh` 強制全跑);等觀察帳在試用期內沒有不一致,才會改成預設。Stop(`aib-skipstop stop`)也做好了:檢查寫在 `skipstop.stop.json`,`reject` 有發現才擋、`warn` 只印、檢查自己壞掉不擋也不算過;同樣預設觀察、`--mode real` 才真的擋。Rust 以外的語言還沒做。
+**現況(0.2.0)要講清楚**:預設是「觀察模式」——每個單位都真跑,只在帳上記下「這次本來可以沿用哪一次、結果是否相同」。真沿用已經做好,要加 `--mode real` 才會啟用(有隨機與強制抽查、每週一次全跑的防守輪、`--fresh` 強制全跑);等觀察帳在試用期內沒有不一致,才會改成預設。Stop(`aib-skipstop stop`)也做好了:檢查寫在 `skipstop.stop.json`,`reject` 有發現才擋、`warn` 只印、檢查自己壞掉不擋也不算過;同樣預設觀察、`--mode real` 才真的擋。Rust 以外的語言還沒做。
 
 不會變的規矩:量不到就真跑;沿用的通過蓋不掉這次真跑出來的失敗;觀察模式的省時不進任何合計;已確認與預估永不相加;讀不懂的照實數出來,不猜。
 
