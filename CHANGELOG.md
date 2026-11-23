@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0 — 2026-11-23
+
+0.1.0 was built as a draft and never published; this is the first version to publish.
+
+- **Saved on the clock.** Each run writes its wall time beside the wall time of the last full
+  run of the same units. `saved` shows it per box (`on the clock`, `clock_ms`): the number to
+  show as "time saved". The unit-time sums stay, said to be what they are.
+- **A project's settings: `skipstop.json`.** `never_reuse` (units that run every time: they
+  deploy, read the network, depend on the date), `defense_period_days`, `keep_days`. A file
+  that is not understood stops the run; it never runs as the defaults.
+- **Units that are any command.** `units` in `skipstop.json`: a command, the files its result
+  depends on, the tools and variables that matter. A repo with no `Cargo.toml` works.
+- **Audits compare which cases ran**, not only how many: the same number of other tests, all
+  green, under one key is a mismatch and revokes the source.
+- A run's ledger file is removed after 30 days; one that holds a revocation never is.
+- `docs/FORMATS.md`: exit codes, JSON, every `plan` word, the events book, the ledger. A test
+  holds it to the code.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, issue forms.
+- 183 tests, 168 knives.
+
 ## 0.1.0 — 2026-11-23
 
 The first version. It began as the `aib test` 2.0 engine of ez2app/ez2-aib.
