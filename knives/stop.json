@@ -109,8 +109,8 @@
    "id": "stop-ST8",
    "why": "an observe-mode stop is recorded as a real one and counted in the total",
    "file": "crates/skipstop-stop/src/run.rs",
-   "old": "        confirmed: true,\n        basis: &basis,\n        real,",
-   "new": "        confirmed: true,\n        basis: &basis,\n        real: real || true,",
+   "old": "        confirmed: measured,\n        basis: &basis,\n        real,",
+   "new": "        confirmed: measured,\n        basis: &basis,\n        real: real || true,",
    "test": "one_stopped_command_is_one_saving_the_largest_named_and_never_the_sum",
    "cmd": [
     "cargo",
@@ -222,8 +222,8 @@
    "id": "stop-ST15",
    "why": "two checks stopping one command count its time twice (the sum, not the largest)",
    "file": "crates/skipstop-stop/src/run.rs",
-   "old": "        .max_by_key(|(ms, _, _)| *ms);",
-   "new": "        .min_by_key(|(ms, _, _)| *ms);",
+   "old": "        .max_by_key(|(ms, _, _, _)| *ms);",
+   "new": "        .min_by_key(|(ms, _, _, _)| *ms);",
    "test": "one_stopped_command_is_one_saving_the_largest_named_and_never_the_sum",
    "cmd": [
     "cargo",
@@ -308,6 +308,22 @@
     "-p",
     "skipstop-stop",
     "--locked"
+   ]
+  },
+  {
+   "id": "stop-EST1",
+   "why": "a number a person wrote in the checks file is recorded as confirmed: it goes into the confirmed sum and the board's large number",
+   "file": "crates/skipstop-stop/src/run.rs",
+   "old": "        confirmed: measured,\n        basis: &basis,",
+   "new": "        confirmed: measured || ms > 0,\n        basis: &basis,",
+   "test": "a_typed_saving_is_an_estimate_and_a_measured_one_is_confirmed",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-stop",
+    "--locked",
+    "--lib"
    ]
   }
  ]

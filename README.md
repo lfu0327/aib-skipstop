@@ -139,7 +139,9 @@ aib-skipstop stop --no-stop -- cargo test --workspace   # you know better than a
   check stops nothing and is said out loud: it must not be able to block all work, and it must
   not read as a pass.
 - What a stop saves: `saves_ms`, or `saves_unit` (the median of that unit's last passing runs in
-  the events book). One stopped command is one saving, the largest any stopping check names,
+  the events book). A `saves_ms` is a number a person wrote: it is recorded as an **estimate**
+  and is never in the confirmed sum or the time on the clock. A `saves_unit` is measured and is
+  confirmed. Use `saves_unit` wherever the stopped work is a unit this tool runs. One stopped command is one saving, the largest any stopping check names,
   never their sum; when none names a number it is recorded as 0 with the reason.
 - In observe mode the stop is recorded as a prediction and the command runs anyway; the output
   then says whether the stop would have been right (it failed) or would have blocked good work

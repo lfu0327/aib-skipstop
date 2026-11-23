@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: a stop's typed saving is an estimate.** A check's `saves_ms` (a number a person wrote in
+  the checks file) was recorded as confirmed, so one stop put that whole number into the
+  confirmed sum and the time on the clock. It is now recorded as an estimate; only a
+  `saves_unit` saving (the median of the unit's own runs) is confirmed. Found on the first real
+  use: one stopped command showed 1 h 20 min "saved" that nobody had measured.
+
 ## 0.2.0 — 2026-11-23
 
 0.1.0 was built as a draft and never published; this is the first version to publish.

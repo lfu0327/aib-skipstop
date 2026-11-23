@@ -173,7 +173,11 @@ fn a_reject_finding_stops_the_command_in_real_mode_and_only_there() {
     assert!(!ran(&t, "t3"), "{}", o.text);
     assert!(o.text.contains("STOPPED by changed"), "{}", o.text);
     let s = saved(&t);
-    assert_eq!(s["all"]["stop"]["confirmed_ms"], 3_600_000, "{s}");
+    // the hour is a number a person wrote in the checks file: an estimate, recorded as one,
+    // and so not in the confirmed sum (nor in the time on the clock)
+    assert_eq!(s["all"]["stop"]["estimated_ms"], 3_600_000, "{s}");
+    assert_eq!(s["all"]["stop"]["confirmed_ms"], 0, "{s}");
+    assert_eq!(s["all"]["clock_ms"], 0, "{s}");
     assert_eq!(s["all"]["skip"]["confirmed_ms"], 0);
 
     // `check` runs the checks only and records nothing
@@ -191,20 +195,20 @@ fn a_reject_finding_stops_the_command_in_real_mode_and_only_there() {
         "{}",
         o.text
     );
-    assert_eq!(saved(&t)["all"]["stop"]["confirmed_ms"], 7_200_000);
+    assert_eq!(saved(&t)["all"]["stop"]["estimated_ms"], 7_200_000);
     // the same words started in another folder are another command: passing in sub/ with
     // --no-stop takes back sub/'s stop and leaves the one started at the root standing
     let o = stop_in(&t, "sub", &["--no-stop"], Some("t3"));
     assert_eq!(o.rc, 0, "{}", o.text);
     assert!(o.text.contains("STOP-WRONG 1 stop(s)"), "{}", o.text);
-    assert_eq!(saved(&t)["all"]["stop"]["confirmed_ms"], 3_600_000);
+    assert_eq!(saved(&t)["all"]["stop"]["estimated_ms"], 3_600_000);
     assert!(git(&ws, &["tag", "-d", "t3"]));
 
     // --no-stop with another command passing says nothing about the one that was stopped
     let o = stop(&t, &["--no-stop"], Some("unrelated"));
     assert_eq!(o.rc, 0, "{}", o.text);
     assert!(!o.text.contains("STOP-WRONG"), "{}", o.text);
-    assert_eq!(saved(&t)["all"]["stop"]["confirmed_ms"], 3_600_000);
+    assert_eq!(saved(&t)["all"]["stop"]["estimated_ms"], 3_600_000);
 
     // --no-stop: the person knows better. The command runs and passes, so the stop on this
     // commit was wrong and what it claimed is taken back, once
@@ -219,7 +223,7 @@ fn a_reject_finding_stops_the_command_in_real_mode_and_only_there() {
     let s = saved(&t);
     assert_eq!(
         (
-            s["all"]["stop"]["confirmed_ms"].as_u64(),
+            s["all"]["stop"]["estimated_ms"].as_u64(),
             s["all"]["stop"]["penalty_ms"].as_u64()
         ),
         (Some(0), Some(7_200_000)),
