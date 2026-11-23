@@ -1009,6 +1009,58 @@ mod tests {
     }
 
     #[test]
+    fn the_formats_document_names_every_plan_word_and_exit_code_there_is() {
+        let doc = include_str!("../../../docs/FORMATS.md");
+        // every reason a unit runs for, as the code spells it
+        for why in [
+            "observe",
+            "fresh",
+            "ledger_unread",
+            "defense_round",
+            "no_source",
+            "flaky",
+        ] {
+            assert!(
+                doc.contains(&format!("| `run:{why}` |")),
+                "run:{why} is not in the document"
+            );
+        }
+        assert!(doc.contains("| `reuse` |"));
+        for code in [
+            Exit::Ok,
+            Exit::Failed,
+            Exit::ZeroUnits,
+            Exit::NothingRan,
+            Exit::TimedOut,
+            Exit::Cancelled,
+            Exit::EngineError,
+            Exit::SpotCheckDiffers,
+        ] {
+            assert!(
+                doc.contains(&format!("\n| {} | ", code.code())),
+                "exit {} is not listed",
+                code.code()
+            );
+        }
+        assert!(doc.contains(&format!(
+            "\n| {} | `stop` |",
+            skipstop_stop::run::EXIT_STOPPED
+        )));
+        for kind in [
+            "unit_time",
+            "time_saved",
+            "time_saved_confirm",
+            "time_saved_wrong",
+            "run_wall",
+        ] {
+            assert!(
+                doc.contains(&format!("| `{kind}` |")),
+                "event kind {kind} is not in the document"
+            );
+        }
+    }
+
+    #[test]
     fn the_plugin_file_names_this_version_and_the_command_this_crate_builds() {
         let v: serde_json::Value =
             serde_json::from_str(include_str!("../../../aib-plugin.json")).expect("JSON");

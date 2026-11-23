@@ -186,6 +186,11 @@ cargo run --release -p skipstop-knife -- run       # all of them, about a minute
 
 不會變的規矩:量不到就真跑;沿用的通過蓋不掉這次真跑出來的失敗;觀察模式的省時不進任何合計;已確認與預估永不相加;讀不懂的照實數出來,不猜。
 
+## Formats
+
+`docs/FORMATS.md`: exit codes, the run's JSON and every `plan` word, `saved --json`, the events
+book, the ledger, and the lines `stop` prints.
+
 ## Releases
 
 `CHANGELOG.md`. A tag `v<version>` builds the three executables and a `SHA256SUMS` into a draft
