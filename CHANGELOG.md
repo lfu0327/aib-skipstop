@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-11-23
 
 - **Fix: a stop's typed saving is an estimate.** A check's `saves_ms` (a number a person wrote in
   the checks file) was recorded as confirmed, so one stop put that whole number into the
