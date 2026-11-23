@@ -49,7 +49,7 @@ A field AIB does not know is left alone, so a newer plugin still lists in an old
 
 | run | prints | format |
 |---|---|---|
-| `aib-skipstop saved --json [--utc-offset <minutes>]` | the five boxes (today, week, month, year, all), skip and stop apart, in milliseconds; `observed` and `unread` beside them | `aib-skipstop.saved/v1` (the object's `"v": 1`) |
+| `aib-skipstop saved --json [--utc-offset <minutes>]` | the five boxes (today, week, month, year, all), skip and stop apart, in milliseconds of **unit time added up** (`"measure": "unit_time_sum"`: more than the clock would show, since units run side by side); `observed` and `unread` beside them | `aib-skipstop.saved/v1` (the object's `"v": 1`) |
 | `aib-skipstop mode` | `observe` or `real`, and who said so | one line |
 | `aib-skipstop --version` | `aib-skipstop <version>` | one line |
 
