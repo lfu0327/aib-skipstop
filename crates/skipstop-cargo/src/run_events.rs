@@ -520,6 +520,61 @@ mod tests {
     #[test]
     fn saved_json_lists_newest_real_savings_only() {
         let mut evs = Vec::new();
+        // observe event: excluded from recent
+        evs.extend(observe(
+            &ctx(),
+            "linux-x86_64",
+            "",
+            &[ran(
+                "obs",
+                Some(Would {
+                    from: "repo/tr-0",
+                    source_ms: Some(9_999),
+                    agreed: true,
+                }),
+            )],
+            AT + 50_000,
+        ));
+        // revoked real event: excluded from recent
+        let mut revoked_u = ran(
+            "rev",
+            Some(Would {
+                from: "repo/tr-rev",
+                source_ms: Some(8_888),
+                agreed: true,
+            }),
+        );
+        revoked_u.reused = true;
+        evs.extend(real(
+            &ctx(),
+            "linux-x86_64",
+            "abc",
+            &[revoked_u],
+            AT + 40_000,
+        ));
+        evs.extend(take_back(&ctx(), &evs, "rev", "repo/tr-rev", AT + 41_000));
+        // precheck (stop) estimated -> confirmed
+        let stop_est = timesave::saved(
+            &ctx(),
+            &timesave::Saved {
+                system: timesave::System::Precheck,
+                rule: "check",
+                verdict: "reject",
+                avoided: "cargo test",
+                saved_ms: 4_000,
+                confirmed: false,
+                basis: "guess",
+                real: true,
+                head: Some("abc"),
+                of: Some(("check1", "stop")),
+            },
+            AT + 26_000,
+        )
+        .unwrap();
+        let stop_id = stop_est["id"].as_str().unwrap().to_string();
+        evs.push(stop_est);
+        evs.push(timesave::confirm(&ctx(), &stop_id, AT + 27_000).unwrap());
+
         for i in 0..25 {
             let unit = format!("u{i}");
             let mut u = ran(
@@ -533,13 +588,18 @@ mod tests {
             u.reused = true;
             evs.extend(real(&ctx(), "linux-x86_64", "abc", &[u], AT + i * 1_000));
         }
-        let s = timesave::summarize(&evs, AT + 30_000, 0);
+        let s = timesave::summarize(&evs, AT + 60_000, 0);
         let j = saved_json(&s, 0);
         let rec = j["recent"].as_array().unwrap();
         assert_eq!(rec.len(), timesave::RECENT_CAP);
-        assert_eq!(rec[0]["saved_ms"], 1_024);
-        assert_eq!(rec[19]["saved_ms"], 1_005);
-        assert_eq!(rec[0]["system"], "shadow");
+        assert_eq!(rec[0]["system"], "precheck");
         assert_eq!(rec[0]["confirmed"], true);
+        assert_eq!(rec[0]["saved_ms"], 4_000);
+        assert_eq!(rec[0]["avoided"], "cargo test");
+        assert_eq!(rec[0]["basis"], "guess");
+        assert!(rec[0]["at"].as_str().is_some_and(|s| !s.is_empty()));
+        assert_eq!(rec[1]["system"], "shadow");
+        assert_eq!(rec[1]["saved_ms"], 1_024);
+        assert_eq!(rec[19]["saved_ms"], 1_006);
     }
 }

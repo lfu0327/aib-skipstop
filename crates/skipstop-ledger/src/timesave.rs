@@ -539,7 +539,7 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
             _ => out.bad += 1,
         }
     }
-    for one in saved.values() {
+    for one in saved.into_values() {
         if !one.real {
             out.observed += 1;
             continue;
@@ -564,8 +564,8 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
             system: one.system,
             confirmed: one.confirmed,
             saved_ms: one.ms,
-            avoided: one.avoided.clone(),
-            basis: one.basis.clone(),
+            avoided: one.avoided,
+            basis: one.basis,
         });
     }
     out.recent.sort_by_key(|a| std::cmp::Reverse(a.at_ms));
