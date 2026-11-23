@@ -206,13 +206,20 @@ pub fn stop_event(
     let ids: Vec<&str> = stops.iter().map(|c| c.id.as_str()).collect();
     let best = stops
         .iter()
-        .filter_map(|c| saving(c, book).map(|(ms, basis)| (ms, basis, *c)))
-        .max_by_key(|(ms, _, _)| *ms);
-    let (ms, basis, by) = match best {
-        Some((ms, basis, c)) => (ms, format!("{basis} (check {}; stopped by {})", c.id, ids.join(", ")), c),
+        .filter_map(|c| saving(c, book).map(|(ms, basis, measured)| (ms, basis, measured, *c)))
+        .max_by_key(|(ms, _, _, _)| *ms);
+    let (ms, basis, measured, by) = match best {
+        Some((ms, basis, measured, c)) => (
+            ms,
+            format!("{basis} (check {}; stopped by {})", c.id, ids.join(", ")),
+            measured,
+            c,
+        ),
         None => (
             0,
             format!("what it saves is not known: no check that stopped it names a number (stopped by {})", ids.join(", ")),
+            // nothing is claimed, so there is nothing to be an estimate of
+            true,
             *first,
         ),
     };
@@ -222,9 +229,10 @@ pub fn stop_event(
         verdict: "reject",
         avoided: &by.avoids,
         saved_ms: ms,
-        // the finding is a fact (the check is of the kind that stops); how long the
-        // stopped work would have taken is what the basis says
-        confirmed: true,
+        // the finding is a fact (the check is of the kind that stops). How long the stopped
+        // work would have taken is confirmed only when it was measured (the unit's own runs);
+        // a number written in the checks file is a person's estimate and is recorded as one
+        confirmed: measured,
         basis: &basis,
         real,
         head: Some(head).filter(|h| !h.is_empty()),
@@ -532,6 +540,74 @@ mod tests {
     }
 
     #[test]
+    fn a_typed_saving_is_an_estimate_and_a_measured_one_is_confirmed() {
+        // a number a person wrote in the checks file
+        let typed = check("typed", Kind::Reject, Some(3_600_000));
+        let e = stop_event(
+            &ctx(),
+            &[(&typed, Says::Finding)],
+            &[],
+            true,
+            "abc",
+            CMD,
+            AT,
+        )
+        .unwrap();
+        assert_eq!(
+            (e["confirmed"].as_bool(), e["saved_ms"].as_u64()),
+            (Some(false), Some(3_600_000)),
+            "{e}"
+        );
+        let s = timesave::summarize(std::slice::from_ref(&e), AT, 0);
+        assert_eq!(
+            (
+                s.all.precheck.confirmed_ms,
+                s.all.precheck.estimated_ms,
+                s.all.precheck.count
+            ),
+            (0, 3_600_000, 1)
+        );
+        // the median of the unit's own passing runs in the book
+        let mut measured = check("measured", Kind::Reject, None);
+        measured.saves_unit = Some("tests".into());
+        let book: Vec<serde_json::Value> = [100u64, 300, 200]
+            .iter()
+            .map(|ms| serde_json::json!({"kind": "unit_time", "unit": "tests", "ms": ms, "outcome": "pass"}))
+            .collect();
+        let e = stop_event(
+            &ctx(),
+            &[(&measured, Says::Finding)],
+            &book,
+            true,
+            "abc",
+            CMD,
+            AT,
+        )
+        .unwrap();
+        assert_eq!(
+            (e["confirmed"].as_bool(), e["saved_ms"].as_u64()),
+            (Some(true), Some(200)),
+            "{e}"
+        );
+        // both stop it: the larger number is the one recorded, with its own label
+        let e = stop_event(
+            &ctx(),
+            &[(&measured, Says::Finding), (&typed, Says::Finding)],
+            &book,
+            true,
+            "abc",
+            CMD,
+            AT,
+        )
+        .unwrap();
+        assert_eq!(
+            (e["confirmed"].as_bool(), e["saved_ms"].as_u64()),
+            (Some(false), Some(3_600_000)),
+            "{e}"
+        );
+    }
+
+    #[test]
     fn a_stop_is_taken_back_once_and_only_for_its_command_on_its_commit() {
         let r = check("conflict", Kind::Reject, Some(1_000));
         let results = vec![(&r, Says::Finding)];
@@ -548,7 +624,7 @@ mod tests {
             timesave::summarize(&book, AT + 9, 0)
                 .all
                 .precheck
-                .confirmed_ms,
+                .estimated_ms,
             3_000
         );
         // another command passing on that commit says nothing about this one
@@ -560,7 +636,7 @@ mod tests {
         let s = timesave::summarize(&book, AT + 9, 0);
         assert_eq!(
             (
-                s.all.precheck.confirmed_ms,
+                s.all.precheck.estimated_ms,
                 s.all.precheck.penalty_ms,
                 s.bad
             ),

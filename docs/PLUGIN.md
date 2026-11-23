@@ -64,7 +64,7 @@ ever run.
 macOS / Linux:
 
 ```sh
-V=0.2.0
+V=0.2.1
 T=aarch64-apple-darwin        # or x86_64-unknown-linux-gnu
 B=https://github.com/lfu0327/aib-skipstop/releases/download/v$V
 D=~/.ez2-aib/plugins/aib-skipstop
@@ -78,7 +78,7 @@ mkdir -p "$D/bin" && cd "$D" \
 Windows (cmd):
 
 ```bat
-set V=0.2.0
+set V=0.2.1
 set F=aib-skipstop-%V%-x86_64-pc-windows-msvc.exe
 set B=https://github.com/lfu0327/aib-skipstop/releases/download/v%V%
 set D=%USERPROFILE%\.ez2-aib\plugins\aib-skipstop

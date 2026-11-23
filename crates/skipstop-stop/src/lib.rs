@@ -304,16 +304,26 @@ pub fn unit_median_ms(evs: &[Value], unit: &str, last: usize) -> Option<u64> {
 /// How many of a unit's last runs a `saves_unit` median is taken over.
 pub const MEDIAN_OVER: usize = 7;
 
-/// What stopping on `c` saves, and where the number comes from; None = not known.
-pub fn saving(c: &Check, evs: &[Value]) -> Option<(u64, String)> {
+/// What stopping on `c` saves: the time, where the number comes from, and whether it was
+/// measured. None = not known.
+///
+/// `saves_ms` is a number a person wrote in the checks file: an estimate, and it is recorded
+/// as one (it is never in the confirmed sum, so never in the large number of a board).
+/// `saves_unit` is the median of that unit's own last passing runs in the events book: measured.
+pub fn saving(c: &Check, evs: &[Value]) -> Option<(u64, String, bool)> {
     if let Some(ms) = c.saves_ms {
-        return Some((ms, "saves_ms in the checks file".into()));
+        return Some((
+            ms,
+            "saves_ms in the checks file (a person's estimate)".into(),
+            false,
+        ));
     }
     let unit = c.saves_unit.as_deref()?;
     let ms = unit_median_ms(evs, unit, MEDIAN_OVER)?;
     Some((
         ms,
         format!("median of the last runs of {unit} in the events book (up to {MEDIAN_OVER})"),
+        true,
     ))
 }
 
@@ -464,8 +474,9 @@ mod tests {
         let mut c = check(Kind::Reject);
         assert_eq!(saving(&c, &evs), None);
         c.saves_unit = Some("tests".into());
-        let (ms, basis) = saving(&c, &evs).unwrap();
-        assert_eq!(ms, 200);
+        let (ms, basis, measured) = saving(&c, &evs).unwrap();
+        // the unit's own runs: measured
+        assert_eq!((ms, measured), (200, true));
         assert!(
             basis.contains("median") && basis.contains("tests"),
             "{basis}"
@@ -474,6 +485,9 @@ mod tests {
         assert_eq!(saving(&c, &evs), None);
         c.saves_unit = None;
         c.saves_ms = Some(42);
-        assert_eq!(saving(&c, &evs).unwrap().0, 42);
+        // a number a person wrote: taken, and said to be an estimate
+        let (ms, basis, measured) = saving(&c, &evs).unwrap();
+        assert_eq!((ms, measured), (42, false));
+        assert!(basis.contains("estimate"), "{basis}");
     }
 }
