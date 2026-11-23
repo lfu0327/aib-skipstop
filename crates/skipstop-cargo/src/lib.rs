@@ -9,6 +9,7 @@
 //! The two are checked against each other: a picked test with no result is not a pass
 //! (nextest stopped, the binary crashed, or the list and the run disagree).
 
+pub mod config;
 pub mod real;
 pub mod run_events;
 pub mod units;

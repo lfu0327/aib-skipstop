@@ -486,6 +486,81 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
     assert_eq!(r.json["mode"], "observe");
     assert_eq!(mode(&["mode", "observe"]).1, "observe (from the mode file)");
 
+    // the project's own settings: a unit it says is never reused runs every time, whatever
+    // its key, and the others are reused as before
+    let cfg = t.0.join("ws/skipstop.json");
+    let commit = |text: &str, what: &str| {
+        fs::write(&cfg, text).unwrap();
+        git(&t.0.join("ws"), &["add", "-A"]);
+        git(&t.0.join("ws"), &["commit", "-q", "-m", what]);
+    };
+    commit(r#"{"never_reuse": {"a": "side_effect"}}"#, "a deploys");
+    // (c is the unit to look at: b's key was revoked above and is never a source again)
+    for _ in 0..2 {
+        let r = run(&t, &["--mode", "real"]);
+        assert_eq!(
+            (r.rc, r.plan("a"), r.result("a"), r.plan("c")),
+            (
+                0,
+                "run:never_reuse:side_effect".into(),
+                "pass".into(),
+                "reuse".into()
+            ),
+            "{}",
+            r.json
+        );
+    }
+    // asked only for the plan, it says the same; and asked for c alone, the file's `a` is
+    // still a package of the workspace: the file is good
+    let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))
+        .current_dir(t.0.join("ws"))
+        .args(["--mode", "real", "--plan", "--json", "--state"])
+        .arg(t.0.join("state"))
+        .env("AIB_SKIPSTOP_SEED", quiet_seed())
+        .env_remove("CARGO_TARGET_DIR")
+        .output()
+        .unwrap();
+    let plan: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    let of = |u: &str| {
+        plan["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["unit"] == u)
+            .unwrap()["plan"]
+            .clone()
+    };
+    assert_eq!(
+        (of("a"), of("c")),
+        ("run:never_reuse:side_effect".into(), "reuse".into()),
+        "{plan}"
+    );
+    let r = run(&t, &["--mode", "real", "-p", "c"]);
+    assert_eq!((r.rc, r.plan("c")), (0, "reuse".into()), "{}", r.json);
+
+    // a settings file that is not understood stops the run: it does not run as the defaults
+    // (in which `a` would have been reused). A name that is no package is such a file too
+    for (bad, says) in [
+        (r#"{"never_resue": {"a": "side_effect"}}"#, "not a setting"),
+        (
+            r#"{"never_reuse": {"aa": "side_effect"}}"#,
+            "no package of this workspace",
+        ),
+    ] {
+        commit(bad, "a typo");
+        let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))
+            .current_dir(t.0.join("ws"))
+            .args(["--mode", "real", "--json", "--state"])
+            .arg(t.0.join("state"))
+            .env_remove("CARGO_TARGET_DIR")
+            .output()
+            .unwrap();
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert_eq!(o.status.code(), Some(7), "{err}");
+        assert!(err.contains("skipstop.json") && err.contains(says), "{err}");
+    }
+    fs::remove_file(&cfg).unwrap();
+
     // a word that is not a mode is refused, not read as one
     let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))
         .current_dir(t.0.join("ws"))

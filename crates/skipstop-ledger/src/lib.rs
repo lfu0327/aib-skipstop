@@ -11,6 +11,7 @@
 
 pub mod envelope;
 pub mod events;
+pub mod strict;
 pub mod timesave;
 
 use serde_json::{Map, Value};

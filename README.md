@@ -186,6 +186,22 @@ cargo run --release -p skipstop-knife -- run       # all of them, about a minute
 
 不會變的規矩:量不到就真跑;沿用的通過蓋不掉這次真跑出來的失敗;觀察模式的省時不進任何合計;已確認與預估永不相加;讀不懂的照實數出來,不猜。
 
+## A project's settings
+
+`skipstop.json` at the repo's root, when the defaults are not right for a project:
+
+```json
+{
+  "never_reuse": {"deploy-tests": "side_effect"},
+  "defense_period_days": 7,
+  "keep_days": 30
+}
+```
+
+A key is the hash of the files a unit reads. A test that reads the network, deploys something
+or depends on the date has an input no file holds: name it in `never_reuse` and it runs every
+time. A file that is not understood stops the run; it never runs as the defaults instead.
+
 ## Formats
 
 `docs/FORMATS.md`: exit codes, the run's JSON and every `plan` word, `saved --json`, the events

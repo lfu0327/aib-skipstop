@@ -1,6 +1,8 @@
 //! Real mode: which units of this run are not run. The rule, in the order it is asked:
 //!
 //! 1. `--fresh` ⇒ every unit runs.
+//! 2. The project's `skipstop.json` says the unit is never reused (it has a side effect, reads
+//!    the network, …) ⇒ it runs. The numbers below go on from here.
 //! 2. The ledger could not be read whole ⇒ every unit runs: the part that was not read may
 //!    hold a newer failure or a revocation, and an older green run must not stand in for it.
 //! 3. The unit's defense round is due ⇒ the unit runs.
@@ -40,8 +42,8 @@ pub const KIND: &str = "test";
 /// What happens to one unit in this run.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
-    /// Runs for real. `why` is a fixed word: `fresh`, `ledger_unread`, `defense_round`,
-    /// `no_source`, `flaky`.
+    /// Runs for real. `why` is a fixed word: `fresh`, `never_reuse:<class>`, `ledger_unread`,
+    /// `defense_round`, `no_source`, `flaky`.
     Run { why: &'static str },
     /// Has a source, runs anyway, and is compared with it.
     Audit(Choice),
@@ -214,13 +216,8 @@ pub fn kind_counts(streams: &[Stream]) -> KindCounts {
 }
 
 /// Is `unit`'s defense round due?
-pub fn defense(streams: &[Stream], unit: &str, now_s: i64) -> Defense {
-    defense_due(
-        last_defense_at(streams, unit),
-        DEFENSE_PERIOD_DAYS,
-        false,
-        now_s,
-    )
+pub fn defense(streams: &[Stream], unit: &str, period_days: i64, now_s: i64) -> Defense {
+    defense_due(last_defense_at(streams, unit), period_days, false, now_s)
 }
 
 /// The same key on the same kind of machine has both passed and failed in this unit's real
@@ -257,6 +254,8 @@ pub struct Asked<'a> {
     /// A fresh number for this run's random draws.
     pub seed: u64,
     pub now_s: i64,
+    /// The project's settings: which units never reuse, and how often the defense round is.
+    pub config: &'a crate::config::Config,
 }
 
 /// The decision for one unit; `has_source` = [`skipstop_core::ledger::local_source`] found one.
@@ -264,12 +263,21 @@ pub fn decide(a: &Asked<'_>, unit: &str, has_source: bool) -> Decision {
     if a.fresh {
         return Decision::Run { why: "fresh" };
     }
+    if let Some(class) = a.config.never_reuse.get(unit) {
+        return Decision::Run {
+            why: crate::config::why_word(*class),
+        };
+    }
     if !a.ledger_ok {
         return Decision::Run {
             why: "ledger_unread",
         };
     }
-    if matches!(defense(a.streams, unit, a.now_s), Defense::Due { .. }) {
+    let period = a.config.defense_period_days;
+    if matches!(
+        defense(a.streams, unit, period, a.now_s),
+        Defense::Due { .. }
+    ) {
         return Decision::Run {
             why: "defense_round",
         };
@@ -382,7 +390,13 @@ mod tests {
             ledger_ok: true,
             seed,
             now_s: NOW_S,
+            config: default_config(),
         }
+    }
+
+    fn default_config() -> &'static crate::config::Config {
+        static C: std::sync::OnceLock<crate::config::Config> = std::sync::OnceLock::new();
+        C.get_or_init(crate::config::Config::default)
     }
 
     fn run(why: &'static str) -> Decision {
@@ -495,13 +509,13 @@ mod tests {
     #[test]
     fn the_defense_round_is_due_first_and_then_once_a_period_counted_from_a_finished_round() {
         assert!(matches!(
-            defense(&[], "a", NOW_S),
+            defense(&[], "a", DEFENSE_PERIOD_DAYS, NOW_S),
             Defense::Due { why: "first", .. }
         ));
         // real-mode runs that were not the round do not count as one
         let no_round = [plain(DAY_MS, vec![unit("a", How::Ran, None)])];
         assert!(matches!(
-            defense(&no_round, "a", NOW_S),
+            defense(&no_round, "a", DEFENSE_PERIOD_DAYS, NOW_S),
             Defense::Due { why: "first", .. }
         ));
         // nor does a round that was killed
@@ -513,10 +527,13 @@ mod tests {
         )];
         assert_eq!(last_defense_at(&killed, "a"), None);
         let done = [round(DAY_MS, &["a"])];
-        assert_eq!(defense(&done, "a", NOW_S), Defense::NotDue);
+        assert_eq!(
+            defense(&done, "a", DEFENSE_PERIOD_DAYS, NOW_S),
+            Defense::NotDue
+        );
         let old = [round(8 * DAY_MS, &["a"])];
         assert!(matches!(
-            defense(&old, "a", NOW_S),
+            defense(&old, "a", DEFENSE_PERIOD_DAYS, NOW_S),
             Defense::Due { why: "overdue", .. }
         ));
         // due again: the unit runs before any audit is asked
@@ -526,7 +543,10 @@ mod tests {
         );
         // the newest finished round is the one that counts
         let both = [old[0].clone(), done[0].clone()];
-        assert_eq!(defense(&both, "a", NOW_S), Defense::NotDue);
+        assert_eq!(
+            defense(&both, "a", DEFENSE_PERIOD_DAYS, NOW_S),
+            Defense::NotDue
+        );
     }
 
     #[test]
@@ -658,6 +678,50 @@ mod tests {
     }
 
     #[test]
+    fn a_unit_the_project_says_is_never_reused_runs_and_the_round_follows_its_setting() {
+        let mut c = crate::config::Config::default();
+        c.never_reuse
+            .insert("a".into(), skipstop_audit::NeverReuse::SideEffect);
+        c.defense_period_days = 2;
+        let done = [round(DAY_MS, &["a", "b"])];
+        let asked = Asked {
+            config: &c,
+            ..ask(&done, false, quiet_seed("b"))
+        };
+        // its round is done, it has a source, it was not drawn: it runs all the same
+        assert_eq!(decide(&asked, "a", true), run("never_reuse:side_effect"));
+        // a unit the file does not name is reused as before
+        assert_eq!(decide(&asked, "b", true), Decision::Reuse);
+        // --fresh is still said first
+        let fresh = Asked {
+            fresh: true,
+            ..ask(&done, true, 0)
+        };
+        assert_eq!(
+            decide(
+                &Asked {
+                    config: &c,
+                    ..fresh
+                },
+                "a",
+                true
+            ),
+            run("fresh")
+        );
+        // the round every two days: a round three days ago is over
+        let old = [round(3 * DAY_MS, &["b"])];
+        let asked = Asked {
+            config: &c,
+            ..ask(&old, false, quiet_seed("b"))
+        };
+        assert_eq!(decide(&asked, "b", true), run("defense_round"));
+        assert_eq!(
+            decide(&ask(&old, false, quiet_seed("b")), "b", true),
+            Decision::Reuse
+        );
+    }
+
+    #[test]
     fn the_revoked_sources_are_read_back_from_the_ledger_each_once() {
         use skipstop_core::ledger::{Origin, Reuse, Shadow};
         let would = |from: &str| {
@@ -694,9 +758,12 @@ mod tests {
     fn a_round_of_one_package_is_no_round_for_the_others() {
         // `--mode real -p a` yesterday: a's round is done, b was never in one
         let only_a = [round(DAY_MS, &["a"])];
-        assert_eq!(defense(&only_a, "a", NOW_S), Defense::NotDue);
+        assert_eq!(
+            defense(&only_a, "a", DEFENSE_PERIOD_DAYS, NOW_S),
+            Defense::NotDue
+        );
         assert!(matches!(
-            defense(&only_a, "b", NOW_S),
+            defense(&only_a, "b", DEFENSE_PERIOD_DAYS, NOW_S),
             Defense::Due { why: "first", .. }
         ));
         assert_eq!(

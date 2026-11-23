@@ -553,6 +553,22 @@
     "--test",
     "timesave"
    ]
+  },
+  {
+   "id": "ledger-ST1",
+   "why": "a key written twice is read as its last value",
+   "file": "crates/skipstop-ledger/src/strict.rs",
+   "old": "                    if m.insert(k.clone(), v).is_some() {",
+   "new": "                    if m.insert(k.clone(), v).is_some() && false {",
+   "test": "a_key_that_comes_twice_is_an_error_at_any_depth",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--lib"
+   ]
   }
  ]
 }
