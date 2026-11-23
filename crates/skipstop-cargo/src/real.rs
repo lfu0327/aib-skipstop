@@ -196,6 +196,102 @@ pub fn expired(streams: &[Stream], keep_days: i64, now_s: i64) -> Vec<&Stream> {
         .collect()
 }
 
+/// What a repo's ledger says of the trial so far: how often a reused result was checked
+/// against a real run and what came of it. It is what a person reads before making real mode
+/// the default; nothing here changes a mode.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Trial {
+    /// when the first finished run was written, ms since 1970 UTC
+    pub first_at_ms: Option<i64>,
+    /// whole days from the first finished run to now
+    pub days: i64,
+    pub runs_real: u64,
+    pub runs_observe: u64,
+    /// unit lines that were not run (real mode)
+    pub reused: u64,
+    /// comparisons of a real run with the source it would have been (or was to be) reused
+    /// from, that agreed: real-mode audits and observe-mode runs alike
+    pub same: u64,
+    /// such comparisons that did not agree: each is a reuse that would have been wrong
+    pub differed: u64,
+    /// audits that could not be compared (an old source, a run that did not finish)
+    pub incomparable: u64,
+    /// sources revoked
+    pub revoked: u64,
+    /// units that ran and failed: failures the runs did find
+    pub reds: u64,
+}
+
+/// The owner's bar for trusting reuse (ez2-aib DEV-shadow r8 §1, Andy): a week of history,
+/// fifty comparisons, three real failures seen, and not one comparison that differed.
+pub const TRIAL_DAYS: i64 = 7;
+pub const TRIAL_COMPARED: u64 = 50;
+pub const TRIAL_REDS: u64 = 3;
+
+impl Trial {
+    pub fn compared(&self) -> u64 {
+        self.same + self.differed
+    }
+    /// Every part of the bar is met. One comparison that differed fails it whatever the rest.
+    pub fn meets_the_bar(&self) -> bool {
+        self.days >= TRIAL_DAYS
+            && self.compared() >= TRIAL_COMPARED
+            && self.reds >= TRIAL_REDS
+            && self.differed == 0
+    }
+}
+
+/// [`Trial`] from the finished runs of the ledger. A run that was killed is not counted: it
+/// is not known what it would have said.
+pub fn trial(streams: &[Stream], now_s: i64) -> Trial {
+    let mut t = Trial::default();
+    for s in streams.iter().filter(|s| s.complete()) {
+        let has = |cell: &str| s.plan.cells.iter().any(|c| c == cell);
+        let real = has(CELL_REAL) || has(CELL_DEFENSE);
+        let observe = has(CELL_OBSERVE);
+        if !real && !observe {
+            continue;
+        }
+        t.first_at_ms = Some(t.first_at_ms.map_or(s.at_ms, |f| f.min(s.at_ms)));
+        if real {
+            t.runs_real += 1;
+        } else {
+            t.runs_observe += 1;
+        }
+        for (_, u) in &s.units {
+            if u.how == How::Reused {
+                t.reused += 1;
+            }
+            if u.how == How::Ran && u.result == skipstop_core::ledger::Outcome::Fail {
+                t.reds += 1;
+            }
+            if let Some(a) = &u.audit {
+                match a.compare {
+                    AuditCompare::Same | AuditCompare::BehaviorChanged => t.same += 1,
+                    AuditCompare::Mismatch => t.differed += 1,
+                    AuditCompare::Incomparable => t.incomparable += 1,
+                }
+                if a.revoke {
+                    t.revoked += 1;
+                }
+            } else if let Some(sh) = &u.shadow {
+                // observe mode: the unit ran, and its result is set beside its would-be source
+                match sh.same {
+                    Some(true) => t.same += 1,
+                    Some(false) => t.differed += 1,
+                    None => {}
+                }
+            }
+        }
+    }
+    if let Some(first) = t.first_at_ms {
+        t.days = ((now_s * 1000 - first) / DAY_MS_I).max(0);
+    }
+    t
+}
+
+const DAY_MS_I: i64 = 86_400_000;
+
 /// (audited, candidates) of the one kind there is: a candidate is a line that ran with a
 /// source to compare against or was reused.
 pub fn kind_counts(streams: &[Stream]) -> KindCounts {
@@ -719,6 +815,112 @@ mod tests {
             decide(&ask(&old, false, quiet_seed("b")), "b", true),
             Decision::Reuse
         );
+    }
+
+    #[test]
+    fn the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar() {
+        let seen = |same: Option<bool>| {
+            let mut u = unit("a", How::Ran, None);
+            u.shadow = Some(skipstop_core::ledger::Shadow {
+                would_reuse: None,
+                same,
+            });
+            u
+        };
+        let mut red = unit("b", How::Ran, None);
+        red.result = Outcome::Fail;
+        let st = vec![
+            // nine days ago: an observe run; one unit agreed with its source, one had none
+            stream(
+                now_ms() - 9 * DAY_MS,
+                CELL_OBSERVE,
+                Some(true),
+                vec![seen(Some(true)), seen(None)],
+            ),
+            round(8 * DAY_MS, &["a", "b"]),
+            // a real run: one reused, one audited and the same, one red
+            plain(
+                2 * DAY_MS,
+                vec![
+                    unit("a", How::Reused, None),
+                    unit("c", How::Ran, Some(AuditCompare::Same)),
+                    red.clone(),
+                ],
+            ),
+            plain(
+                DAY_MS,
+                vec![unit("c", How::Ran, Some(AuditCompare::Incomparable))],
+            ),
+            // killed: not counted, whatever it holds
+            stream(
+                now_ms() - DAY_MS,
+                CELL_REAL,
+                None,
+                vec![unit("a", How::Reused, None), red.clone()],
+            ),
+            // another program's stream in the same ledger
+            stream(
+                now_ms() - 30 * DAY_MS,
+                "some-other-cell",
+                Some(true),
+                vec![red.clone()],
+            ),
+        ];
+        let t = trial(&st, NOW_S);
+        assert_eq!((t.days, t.runs_real, t.runs_observe), (9, 3, 1));
+        assert_eq!(
+            (
+                t.reused,
+                t.same,
+                t.differed,
+                t.incomparable,
+                t.revoked,
+                t.reds
+            ),
+            (1, 2, 0, 1, 0, 1)
+        );
+        assert_eq!(t.compared(), 2);
+        assert!(!t.meets_the_bar(), "two comparisons are not fifty");
+
+        // the bar: a week, fifty comparisons, three reds, none that differed
+        let met = Trial {
+            first_at_ms: Some(0),
+            days: TRIAL_DAYS,
+            same: TRIAL_COMPARED,
+            reds: TRIAL_REDS,
+            ..Trial::default()
+        };
+        assert!(met.meets_the_bar());
+        for short in [
+            Trial {
+                days: TRIAL_DAYS - 1,
+                ..met.clone()
+            },
+            Trial {
+                same: TRIAL_COMPARED - 1,
+                ..met.clone()
+            },
+            Trial {
+                reds: TRIAL_REDS - 1,
+                ..met.clone()
+            },
+            // one reuse that would have been wrong, among a thousand that were right
+            Trial {
+                same: 1000,
+                differed: 1,
+                ..met.clone()
+            },
+        ] {
+            assert!(!short.meets_the_bar(), "{short:?}");
+        }
+        // a mismatch found by an audit is a comparison that differed, and its source is revoked
+        let bad = vec![plain(
+            DAY_MS,
+            vec![unit("a", How::Ran, Some(AuditCompare::Mismatch))],
+        )];
+        let t = trial(&bad, NOW_S);
+        assert_eq!((t.same, t.differed, t.revoked), (0, 1, 1));
+        assert_eq!(trial(&[], NOW_S), Trial::default());
     }
 
     #[test]

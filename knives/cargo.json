@@ -1095,6 +1095,54 @@
     "--test",
     "real_mode"
    ]
+  },
+  {
+   "id": "cargo-TR1",
+   "why": "the bar is met with a comparison that differed",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "            && self.differed == 0",
+   "new": "            && self.differed <= self.same",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TR2",
+   "why": "a run that was killed is counted in the trial",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    for s in streams.iter().filter(|s| s.complete()) {",
+   "new": "    for s in streams.iter() {",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TR3",
+   "why": "another program's runs in the same ledger are counted in the trial",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        if !real && !observe {",
+   "new": "        if !real && !observe && s.units.is_empty() {",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
   }
  ]
 }
