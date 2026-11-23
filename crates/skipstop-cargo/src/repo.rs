@@ -41,6 +41,14 @@ pub fn folder_id(dir: &Path) -> String {
     }
 }
 
+const MAX_ID_LEN: usize = 128;
+
+fn with_suffix(prefix: &str, suffix: &str) -> String {
+    let max_pre = MAX_ID_LEN.saturating_sub(suffix.len());
+    let pre: String = prefix.chars().take(max_pre).collect();
+    format!("{pre}{suffix}")
+}
+
 /// The id of a clone from its common git folder (`<clone>/.git`, or a bare repo's own
 /// folder): the clone's folder name, then eight hex digits of the folder's whole path, so two
 /// clones of one name are two ledgers.
@@ -54,7 +62,7 @@ pub fn id_from_common(common: &Path) -> String {
     h.update(common.to_string_lossy().as_bytes());
     let d = h.finalize();
     let hex: String = d.iter().take(4).map(|b| format!("{b:02x}")).collect();
-    format!("{}-{hex}", folder_id(named))
+    with_suffix(&folder_id(named), &format!("-{hex}"))
 }
 
 /// The path git's `rev-parse --git-common-dir` names, started in `root`: one line, taken
@@ -77,6 +85,9 @@ pub fn common_dir(root: &Path) -> Result<PathBuf, String> {
         .arg("-C")
         .arg(root)
         .args(["rev-parse", "--git-common-dir"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(|e| format!("git: {e}"))?;
     if !out.status.success() {
@@ -99,7 +110,7 @@ pub fn id_or_problem(root: &Path, common: Result<PathBuf, String>) -> (String, O
     match common {
         Ok(c) => (id_from_common(&c), None),
         Err(e) => (
-            format!("{}-clone-unknown", folder_id(root)),
+            with_suffix(&folder_id(root), "-clone-unknown"),
             Some(format!(
                 "which clone this is could not be told ({e}): its ledger is not read"
             )),
@@ -164,5 +175,21 @@ mod tests {
         );
         assert_eq!(common_from_git(root, "--some-option\n.git\n"), None);
         assert_eq!(common_from_git(root, ""), None);
+    }
+
+    #[test]
+    fn repo_id_never_exceeds_128_chars() {
+        let long_name = "a".repeat(200);
+        let common = PathBuf::from(format!("/w/{long_name}/.git"));
+        let id = id_from_common(&common);
+        assert!(id.len() <= MAX_ID_LEN, "len={}", id.len());
+        assert_eq!(id.len(), MAX_ID_LEN);
+
+        let (unk, _) = id_or_problem(
+            &PathBuf::from(format!("/w/{long_name}")),
+            Err("no git".into()),
+        );
+        assert!(unk.len() <= MAX_ID_LEN, "len={}", unk.len());
+        assert!(unk.ends_with("-clone-unknown"), "{unk}");
     }
 }

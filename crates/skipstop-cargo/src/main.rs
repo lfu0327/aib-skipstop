@@ -172,6 +172,9 @@ fn git(root: &Path, a: &[&str]) -> Option<String> {
         .arg("-C")
         .arg(root)
         .args(a)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .ok()?;
     o.status
@@ -368,7 +371,11 @@ fn root_from(
 /// that could not be told is a problem like a file that could not be read: nothing is reused.
 fn repo_streams(ledger_root: &Path, root: &Path) -> (String, Vec<ledger::Stream>, Vec<String>) {
     let (id, unknown) = repo_id(root);
-    let (streams, mut problems) = ledger::streams(ledger_root, &id);
+    let (streams, mut problems) = if unknown.is_some() {
+        (Vec::new(), Vec::new())
+    } else {
+        ledger::streams(ledger_root, &id)
+    };
     problems.extend(unknown);
     (id, streams, problems)
 }
@@ -595,12 +602,18 @@ fn run(a: &Args) -> Result<Exit, String> {
 
     // the key of each unit, from the files on disk
     let env: Vec<(String, String)> = std::env::vars().collect();
+    let target_shared = !ws.target_dir.is_empty() && !Path::new(&ws.target_dir).starts_with(&root);
+    let target_dir = if target_shared {
+        format!("{}@{}", ws.target_dir, root.display())
+    } else {
+        ws.target_dir.clone()
+    };
     let ctx = Context {
         machine_kind: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         toolchain: context::cargo_toolchain(),
         vars: CARGO_VARS.iter().map(|s| s.to_string()).collect(),
-        target_dir: ws.target_dir.clone(),
-        target_shared: false,
+        target_dir,
+        target_shared,
     };
     let all = key::wide_paths(&root);
     let chash = ctx.hash(&env);
@@ -624,7 +637,7 @@ fn run(a: &Args) -> Result<Exit, String> {
                     machine_kind: ctx.machine_kind.clone(),
                     toolchain: tools,
                     vars: u.env.clone(),
-                    target_dir: String::new(),
+                    target_dir: root.to_string_lossy().into_owned(),
                     target_shared: false,
                 };
                 let ch = ctx.hash(&env).map_err(|e| format!("{e:?}"))?;
@@ -908,7 +921,18 @@ fn run(a: &Args) -> Result<Exit, String> {
     let head = git(&root, &["rev-parse", "HEAD"]).unwrap_or_default();
     let tree = git(&root, &["rev-parse", "HEAD^{tree}"]).unwrap_or_default();
     let dirty = git(&root, &["status", "--porcelain"]).is_none_or(|s| !s.is_empty());
-    let inv = format!("tr-{}-{}", started, std::process::id());
+    let inv = {
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_i64(started);
+        h.write_u32(std::process::id());
+        format!(
+            "tr-{}-{}-{:08x}",
+            started,
+            std::process::id(),
+            h.finish() as u32
+        )
+    };
     let plan = Plan {
         head: head.clone(),
         tree: if dirty {

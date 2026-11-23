@@ -1148,7 +1148,7 @@
    "id": "cargo-RP1",
    "why": "a clone that cannot be told gets the id a real clone could have",
    "file": "crates/skipstop-cargo/src/repo.rs",
-   "old": "            format!(\"{}-clone-unknown\", folder_id(root)),",
+   "old": "            with_suffix(&folder_id(root), \"-clone-unknown\"),",
    "new": "            id_from_common(&root.join(\".git\")),",
    "test": "a_clone_that_cannot_be_told_is_a_problem_and_a_folder_of_its_own",
    "cmd": [
@@ -1164,8 +1164,8 @@
    "id": "cargo-RP2",
    "why": "two clones in folders of one name share a ledger",
    "file": "crates/skipstop-cargo/src/repo.rs",
-   "old": "    format!(\"{}-{hex}\", folder_id(named))",
-   "new": "    format!(\"{}-{}\", folder_id(named), hex.len())",
+   "old": "    with_suffix(&folder_id(named), &format!(\"-{hex}\"))",
+   "new": "    with_suffix(&folder_id(named), &format!(\"-{}\", hex.len()))",
    "test": "two_clones_in_folders_of_one_name_are_two_ledgers",
    "cmd": [
     "cargo",
@@ -1197,7 +1197,7 @@
    "why": "git's relative answer is not taken from the root: each working tree names another folder",
    "file": "crates/skipstop-cargo/src/repo.rs",
    "old": "    Some(if p.is_absolute() { p } else { root.join(p) })",
-   "new": "    Some(p)",
+   "new": "    { let _ = root; Some(p) }",
    "test": "gits_answer_is_one_line_and_a_relative_one_is_under_the_root",
    "cmd": [
     "cargo",
@@ -1213,7 +1213,7 @@
    "why": "a clone that could not be told is not a ledger problem: its runs could be reused",
    "file": "crates/skipstop-cargo/src/main.rs",
    "old": "    problems.extend(unknown);",
-   "new": "    drop(unknown);",
+   "new": "    let _ = (&mut problems, unknown);",
    "test": "a_folder_git_does_not_know_is_a_ledger_problem_so_nothing_is_reused",
    "cmd": [
     "cargo",
