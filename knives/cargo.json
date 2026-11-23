@@ -1143,6 +1143,104 @@
     "--locked",
     "--lib"
    ]
+  },
+  {
+   "id": "cargo-RP1",
+   "why": "a clone that cannot be told gets the id a real clone could have",
+   "file": "crates/skipstop-cargo/src/repo.rs",
+   "old": "            with_suffix(&folder_id(root), \"-clone-unknown\"),",
+   "new": "            id_from_common(&root.join(\".git\")),",
+   "test": "a_clone_that_cannot_be_told_is_a_problem_and_a_folder_of_its_own",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RP2",
+   "why": "two clones in folders of one name share a ledger",
+   "file": "crates/skipstop-cargo/src/repo.rs",
+   "old": "    with_suffix(&folder_id(named), &format!(\"-{hex}\"))",
+   "new": "    with_suffix(&folder_id(named), &format!(\"-{}\", hex.len()))",
+   "test": "two_clones_in_folders_of_one_name_are_two_ledgers",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RP3",
+   "why": "a two-line answer from git is taken as a path",
+   "file": "crates/skipstop-cargo/src/repo.rs",
+   "old": "    if lines.next().is_some() {",
+   "new": "    if lines.next().is_none() {",
+   "test": "gits_answer_is_one_line_and_a_relative_one_is_under_the_root",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RP4",
+   "why": "git's relative answer is not taken from the root: each working tree names another folder",
+   "file": "crates/skipstop-cargo/src/repo.rs",
+   "old": "    Some(if p.is_absolute() { p } else { root.join(p) })",
+   "new": "    { let _ = root; Some(p) }",
+   "test": "gits_answer_is_one_line_and_a_relative_one_is_under_the_root",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-RP5",
+   "why": "a clone that could not be told is not a ledger problem: its runs could be reused",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    problems.extend(unknown);",
+   "new": "    let _ = (&mut problems, unknown);",
+   "test": "a_folder_git_does_not_know_is_a_ledger_problem_so_nothing_is_reused",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-RP6",
+   "why": "each working tree is its own ledger again: the id comes from the tree, not the clone",
+   "file": "crates/skipstop-cargo/src/repo.rs",
+   "old": "    id_or_problem(root, common_dir(root))",
+   "new": "    id_or_problem(root, Ok(root.to_path_buf()))",
+   "test": "a_clones_working_trees_share_one_ledger_and_another_clone_reads_none_of_it",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
   }
  ]
 }

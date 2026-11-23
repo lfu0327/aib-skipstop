@@ -700,3 +700,125 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
         .unwrap();
     assert_eq!(o.status.code(), Some(64));
 }
+
+/// `aib-skipstop trial --json` started in `dir`, on the ledger under `state`.
+fn trial_in(dir: &Path, state: &Path) -> serde_json::Value {
+    let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))
+        .current_dir(dir)
+        .args(["trial", "--json", "--state"])
+        .arg(state)
+        .env_remove("AIB_SKIPSTOP_MODE")
+        .output()
+        .unwrap();
+    serde_json::from_slice(&o.stdout).unwrap_or_else(|e| {
+        panic!(
+            "not JSON ({e}): {}\n{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        )
+    })
+}
+
+fn ledger_folders(state: &Path) -> Vec<String> {
+    let mut v: Vec<String> = fs::read_dir(state.join("ledger"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+/// Every working tree of a clone keeps its runs in the clone's one ledger folder (so a
+/// trial's history is not split between them, and does not end with one of them); a folder
+/// of another clone, whatever its name, is not read.
+#[test]
+fn a_clones_working_trees_share_one_ledger_and_another_clone_reads_none_of_it() {
+    let have = Command::new("cargo")
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !have {
+        assert!(
+            std::env::var("SKIPSTOP_ALLOW_NO_NEXTEST").as_deref() == Ok("1"),
+            "cargo-nextest is not installed: install it (cargo install cargo-nextest --locked), \
+             or set SKIPSTOP_ALLOW_NO_NEXTEST=1 to let this test pass without running"
+        );
+        eprintln!("cargo-nextest is not installed: the end-to-end test did not run");
+        return;
+    }
+    let d = std::env::temp_dir().join(format!("skipstop-trees-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    fs::create_dir_all(d.join("ws/src")).unwrap();
+    fs::create_dir_all(d.join("state")).unwrap();
+    let t = Tmp(d);
+    let ws = t.0.join("ws");
+    let state = t.0.join("state");
+    for (p, c) in [
+        (
+            "Cargo.toml",
+            "[package]\nname = \"one\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+        ),
+        (
+            "src/lib.rs",
+            "#[cfg(test)]\nmod tests {\n    #[test]\n    fn it_is() {}\n}\n",
+        ),
+        (".gitignore", "target/\n"),
+    ] {
+        fs::write(ws.join(p), c).unwrap();
+    }
+    let lock = Command::new("cargo")
+        .current_dir(&ws)
+        .args(["generate-lockfile", "--offline"])
+        .output()
+        .unwrap();
+    assert!(lock.status.success());
+    git(&ws, &["init", "-q", "-b", "main"]);
+    git(&ws, &["add", "-A"]);
+    git(&ws, &["commit", "-q", "-m", "start"]);
+
+    let r = run(&t, &["--mode", "real"]);
+    assert_eq!(r.rc, 0, "{}", r.json);
+    let folders = ledger_folders(&state);
+    assert_eq!(folders.len(), 1, "{folders:?}");
+    let clone_id = folders[0].clone();
+    // the clone's folder name and eight hex digits of where its git folder is
+    assert!(
+        clone_id.starts_with("ws-") && clone_id.len() == "ws-".len() + 8,
+        "{clone_id}"
+    );
+
+    // a second working tree of the same clone: it sees the first one's run, and writes its
+    // own into the same folder
+    git(&ws, &["worktree", "add", "-q", "-b", "side", "../side"]);
+    let side = t.0.join("side");
+    assert_eq!(trial_in(&side, &state)["runs_real"], 1);
+    let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))
+        .current_dir(&side)
+        .args(["--mode", "real", "--json", "--state"])
+        .arg(&state)
+        .env_remove("AIB_SEAT")
+        .env("AIB_SKIPSTOP_SEED", quiet_seed())
+        .env_remove("AIB_SKIPSTOP_MODE")
+        .env_remove("CARGO_TARGET_DIR")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(ledger_folders(&state), vec![clone_id.clone()]);
+    let both = trial_in(&ws, &state);
+    assert_eq!(both["runs_real"], 2, "{both}");
+    assert_eq!(both["ledger_problems"], serde_json::json!([]));
+
+    // another clone, and a working tree of it in a folder named like the first clone's
+    // ledger (the name a 0.3 ledger would have had): neither reads the first clone's runs
+    let other = t.0.join("other");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("f"), "x\n").unwrap();
+    git(&other, &["init", "-q", "-b", "main"]);
+    git(&other, &["add", "-A"]);
+    git(&other, &["commit", "-q", "-m", "start"]);
+    let named = format!("../{clone_id}");
+    git(&other, &["worktree", "add", "-q", "-b", "old", &named]);
+    assert_eq!(trial_in(&t.0.join(&clone_id), &state)["runs_real"], 0);
+    assert_eq!(trial_in(&other, &state)["runs_real"], 0);
+}

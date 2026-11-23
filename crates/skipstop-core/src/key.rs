@@ -74,6 +74,9 @@ pub fn repo_root(start: &Path) -> Result<PathBuf, Unmeasurable> {
         .arg("-C")
         .arg(start)
         .args(["rev-parse", "--show-toplevel"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(|e| Unmeasurable::GitFailed(e.to_string()))?;
     if !out.status.success() {
@@ -99,6 +102,9 @@ pub fn wide_paths(root: &Path) -> Result<Vec<String>, Unmeasurable> {
             "--others",
             "--exclude-standard",
         ])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(|e| Unmeasurable::GitFailed(e.to_string()))?;
     if !out.status.success() {

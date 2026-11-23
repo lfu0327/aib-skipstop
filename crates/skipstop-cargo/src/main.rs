@@ -9,6 +9,7 @@
 
 use skipstop_audit::{engine, Compare, Outcome as AuditOutcome, Verdict};
 use skipstop_cargo::real::{self, Decision};
+use skipstop_cargo::repo::repo_id;
 use skipstop_cargo::units::{self, Workspace};
 use skipstop_cargo::{list_args, parse_junit, parse_list, run_args, run_files, tool_config};
 use skipstop_core::context::{self, Context, CARGO_VARS};
@@ -171,6 +172,9 @@ fn git(root: &Path, a: &[&str]) -> Option<String> {
         .arg("-C")
         .arg(root)
         .args(a)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .ok()?;
     o.status
@@ -190,7 +194,7 @@ fn cargo(root: &Path, a: &[String]) -> Result<std::process::Output, String> {
 fn trial_report(a: &Args) -> Result<String, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = key::repo_root(&cwd).map_err(|e| format!("{e:?}"))?;
-    let (streams, problems) = ledger::streams(&state_root(a).join("ledger"), &repo_id(&root));
+    let (_, streams, problems) = repo_streams(&state_root(a).join("ledger"), &root);
     let t = real::trial(&streams, now_ms() / 1000);
     let bar = t.meets_the_bar() && problems.is_empty();
     if a.json {
@@ -363,27 +367,17 @@ fn root_from(
     aib.join("state").join("aib-skipstop")
 }
 
-/// A plain id for the ledger from the repo folder name.
-fn repo_id(root: &Path) -> String {
-    let n = root
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let s: String = n
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    if s.is_empty() {
-        "repo".into()
+/// Every run of this repo in the ledger (see `skipstop_cargo::repo`), and its id. A clone
+/// that could not be told is a problem like a file that could not be read: nothing is reused.
+fn repo_streams(ledger_root: &Path, root: &Path) -> (String, Vec<ledger::Stream>, Vec<String>) {
+    let (id, unknown) = repo_id(root);
+    let (streams, mut problems) = if unknown.is_some() {
+        (Vec::new(), Vec::new())
     } else {
-        s
-    }
+        ledger::streams(ledger_root, &id)
+    };
+    problems.extend(unknown);
+    (id, streams, problems)
 }
 
 struct Row {
@@ -608,20 +602,25 @@ fn run(a: &Args) -> Result<Exit, String> {
 
     // the key of each unit, from the files on disk
     let env: Vec<(String, String)> = std::env::vars().collect();
+    let target_shared = !ws.target_dir.is_empty() && !Path::new(&ws.target_dir).starts_with(&root);
+    let target_dir = if target_shared {
+        format!("{}@{}", ws.target_dir, root.display())
+    } else {
+        ws.target_dir.clone()
+    };
     let ctx = Context {
         machine_kind: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         toolchain: context::cargo_toolchain(),
         vars: CARGO_VARS.iter().map(|s| s.to_string()).collect(),
-        target_dir: ws.target_dir.clone(),
-        target_shared: false,
+        target_dir,
+        target_shared,
     };
     let all = key::wide_paths(&root);
     let chash = ctx.hash(&env);
     let mut cache = FileCache::default();
     let present = |f: &str| root.join(f).exists();
     let state = state_root(a);
-    let rid = repo_id(&root);
-    let (streams, problems) = ledger::streams(&state.join("ledger"), &rid);
+    let (rid, streams, problems) = repo_streams(&state.join("ledger"), &root);
     let mut rows: Vec<Row> = Vec::new();
     for name in &chosen {
         let k = (|| -> Result<String, String> {
@@ -638,7 +637,7 @@ fn run(a: &Args) -> Result<Exit, String> {
                     machine_kind: ctx.machine_kind.clone(),
                     toolchain: tools,
                     vars: u.env.clone(),
-                    target_dir: String::new(),
+                    target_dir: root.to_string_lossy().into_owned(),
                     target_shared: false,
                 };
                 let ch = ctx.hash(&env).map_err(|e| format!("{e:?}"))?;
@@ -922,7 +921,18 @@ fn run(a: &Args) -> Result<Exit, String> {
     let head = git(&root, &["rev-parse", "HEAD"]).unwrap_or_default();
     let tree = git(&root, &["rev-parse", "HEAD^{tree}"]).unwrap_or_default();
     let dirty = git(&root, &["status", "--porcelain"]).is_none_or(|s| !s.is_empty());
-    let inv = format!("tr-{}-{}", started, std::process::id());
+    let inv = {
+        use std::hash::{BuildHasher, Hasher};
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_i64(started);
+        h.write_u32(std::process::id());
+        format!(
+            "tr-{}-{}-{:08x}",
+            started,
+            std::process::id(),
+            h.finish() as u32
+        )
+    };
     let plan = Plan {
         head: head.clone(),
         tree: if dirty {
@@ -1292,6 +1302,22 @@ fn audit_of(audit: &Verdict, source: &Verdict, met: bool) -> Audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_git_does_not_know_is_a_ledger_problem_so_nothing_is_reused() {
+        let d = std::env::temp_dir().join(format!("skipstop-nogit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        assert!(std::fs::create_dir_all(d.join("ledger")).is_ok());
+        let (id, streams, problems) = repo_streams(&d.join("ledger"), &d);
+        let _ = std::fs::remove_dir_all(&d);
+        assert!(id.ends_with("-clone-unknown"), "{id}");
+        assert!(streams.is_empty());
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("its ledger is not read"),
+            "{problems:?}"
+        );
+    }
 
     fn v(tests_ran: Option<u32>, failed: &[&str]) -> Verdict {
         Verdict {

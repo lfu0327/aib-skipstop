@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 — 2026-11-23
+
+- **The ledger is kept per clone, not per folder name.** Until now a repo's runs were kept under
+  the name of the folder the run started in, so every working tree of one clone
+  (`git worktree add`) had its own ledger: `aib-skipstop trial` counted only that tree's runs, and
+  the history ended when the tree was removed; two different repos in folders of one name
+  shared a ledger. Now the folder is `<clone's folder name>-<8 hex of where its git folder is>`,
+  the same for every working tree of a clone.
+- **History starts again.** A ledger kept under the older name is not read (it stays on disk
+  under `<state>/ledger/<folder name>/` and can be removed): its runs were named per folder,
+  and a revocation in one working tree's folder would not be seen from another. The first
+  real-mode run after the update runs everything, and `trial` counts from there. The
+  time-saved book is not touched.
+- When git does not tell which clone a folder belongs to, that is a ledger problem like a file
+  that cannot be read: it is named in `ledger_problems` and nothing is reused.
+- Sharing a ledger does not widen what is reused: a run is reused only under the same key,
+  and the key holds the unit, its inputs and the build folder.
+
 ## 0.3.0 — 2026-11-23
 
 - `aib-skipstop trial`: what the repo's ledger says of the trial so far (runs, reuses,

@@ -157,6 +157,13 @@ it is a gate or evidence for one.
 
 ## The ledger: `<state>/ledger/<repo>/<invocation_id>.jsonl`
 
+`<repo>` names the clone: its folder name, `-`, and eight hex digits of the sha256 of the path
+of its git folder (`git rev-parse --git-common-dir`, links resolved), so every working tree of
+one clone writes to the same folder and two clones of one name do not. Before 0.4 it was the
+name of the working tree's own folder; a folder of that name is no longer read. When git does
+not tell the git folder, `<repo>` is `<folder name>-clone-unknown`, the run says so in
+`ledger_problems`, and nothing is reused.
+
 One file per run: a `plan` line, a line per unit, an `end` line. A unit that ran has `output_digest`:
 `cases-v1:` and the sha256 of which cases it ran and how each ended (order and times left out). A run without its `end` line
 was killed or is still going, and is not a source. A file that cannot be read whole is a
