@@ -281,3 +281,36 @@ fn a_command_is_a_unit_reused_while_its_named_files_stand_and_run_when_they_chan
     assert_eq!(r.rc, 7, "{}", r.err);
     assert!(r.err.contains("has no \"inputs\""), "{}", r.err);
 }
+
+#[test]
+fn a_command_unit_that_times_out_fails_and_is_never_reused() {
+    let d = std::env::temp_dir().join(format!("skipstop-cmd-timeout-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    fs::create_dir_all(d.join("repo")).unwrap();
+    fs::create_dir_all(d.join("state")).unwrap();
+    let t = Tmp(d);
+    let repo = t.0.join("repo");
+    fs::write(repo.join("data.txt"), "ok\n").unwrap();
+    let cmd = if cfg!(windows) {
+        r#"["cmd", "/C", "ping -n 15 127.0.0.1 >nul"]"#
+    } else {
+        r#"["sh", "-c", "sleep 10"]"#
+    };
+    fs::write(
+        repo.join("skipstop.json"),
+        format!(
+            "{{\"units\": {{\"slow\": {{\"run\": {cmd}, \"inputs\": [\"data.txt\"], \"timeout_s\": 1}}}}}}"
+        ),
+    )
+    .unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "start"]);
+
+    for i in 0..2 {
+        let r = run(&t, &["--mode", "real"]);
+        assert_eq!(r.rc, 5, "run {i}: {}", r.json);
+        assert_eq!(r.result("slow"), "fail", "run {i}: {}", r.json);
+        assert_ne!(r.plan("slow"), "reuse", "run {i}: {}", r.json);
+    }
+}

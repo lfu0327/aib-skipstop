@@ -712,4 +712,50 @@ mod tests {
         c.cmd = sh("test -f marker");
         assert_eq!(run_check(d.path(), &c), Ended::Code(0));
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_timeout_kills_process_tree() {
+        let d = tempfile::tempdir().unwrap();
+        let mut c = check("c", Kind::Reject, None);
+        // Positive control: a child started via `start /B` outlives the parent and writes `early`
+        std::fs::write(
+            d.path().join("early.cmd"),
+            "@echo off\r\nping -n 2 127.0.0.1 >nul\r\ntype nul > early\r\n",
+        )
+        .unwrap();
+        c.timeout_s = 60;
+        c.cmd = vec![
+            "cmd".to_string(),
+            "/C".to_string(),
+            "start /B cmd /C early.cmd & exit 0".to_string(),
+        ];
+        assert_eq!(run_check(d.path(), &c), Ended::Code(0));
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(d.path().join("early").exists());
+
+        // Timeout: `taskkill /T` must kill the spawned `late.cmd` child tree too
+        std::fs::write(
+            d.path().join("late.cmd"),
+            "@echo off\r\nping -n 4 127.0.0.1 >nul\r\ntype nul > late\r\n",
+        )
+        .unwrap();
+        c.timeout_s = 1;
+        c.cmd = vec![
+            "cmd".to_string(),
+            "/C".to_string(),
+            "start /B cmd /C late.cmd & ping -n 20 127.0.0.1 >nul".to_string(),
+        ];
+        let t = Instant::now();
+        assert_eq!(run_check(d.path(), &c), Ended::Timeout);
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "killed at its limit, not waited for"
+        );
+        std::thread::sleep(Duration::from_secs(5));
+        assert!(
+            !d.path().join("late").exists(),
+            "a child process left behind by taskkill /T went on running"
+        );
+    }
 }
