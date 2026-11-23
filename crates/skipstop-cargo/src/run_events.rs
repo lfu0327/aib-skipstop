@@ -169,13 +169,21 @@ pub fn saved_text(s: &timesave::Summary, offset_min: i32) -> String {
     ] {
         let t = p.total();
         out += &format!(
-            "  {name:<10} {}  (skip {} · stop {})  estimated {}  taken back {}  savings {}\n",
+            "  {name:<10} {}  (skip {} · stop {})  estimated {}  taken back {}  savings {}  | on the clock {}{}\n",
             clock(t.confirmed_ms),
             clock(p.shadow.confirmed_ms),
             clock(p.precheck.confirmed_ms),
             clock(t.estimated_ms),
             clock(t.penalty_ms),
-            t.count
+            t.count,
+            // skip: baseline wall minus the run's wall; stop: what the stopped command would
+            // have taken is a time on the clock already
+            clock(p.clock_ms.saturating_add(p.precheck.confirmed_ms)),
+            if p.clock_unknown > 0 {
+                format!(" (+{} run(s) with no full run to compare with)", p.clock_unknown)
+            } else {
+                String::new()
+            }
         );
     }
     match s.since_ms {
@@ -205,10 +213,19 @@ pub fn saved_json(s: &timesave::Summary, offset_min: i32) -> Value {
             "penalty_ms": x.penalty_ms, "count": x.count,
         })
     };
-    let period = |p: &timesave::Period| serde_json::json!({ "total": sum(&p.total()), "skip": sum(&p.shadow), "stop": sum(&p.precheck) });
+    let period = |p: &timesave::Period| {
+        serde_json::json!({
+            "total": sum(&p.total()), "skip": sum(&p.shadow), "stop": sum(&p.precheck),
+            // on the clock: skip as baseline wall minus the run's wall, stop as what the
+            // stopped command would have taken
+            "clock_ms": p.clock_ms.saturating_add(p.precheck.confirmed_ms),
+            "skip_clock_ms": p.clock_ms,
+            "skip_clock_unknown_runs": p.clock_unknown,
+        })
+    };
     serde_json::json!({
         "v": 1,
-        // what the milliseconds are: not time on the clock
+        // what total / skip / stop milliseconds are: not time on the clock (clock_ms is)
         "measure": "unit_time_sum",
         "utc_offset_min": offset_min,
         "today": period(&s.today), "week": period(&s.week), "month": period(&s.month),
@@ -346,7 +363,7 @@ mod tests {
         );
         // 1:02:05 confirmed; the estimate (0:01:00) and the prediction are not in it
         assert!(
-            text.contains("  today      1:02:05  (skip 0:00:00 · stop 1:02:05)  estimated 0:01:00  taken back 0:00:00  savings 2\n"),
+            text.contains("  today      1:02:05  (skip 0:00:00 · stop 1:02:05)  estimated 0:01:00  taken back 0:00:00  savings 2  | on the clock 1:02:05\n"),
             "{text}"
         );
         assert!(text.contains("1 observe-mode prediction(s)"), "{text}");
@@ -354,6 +371,10 @@ mod tests {
         let j = saved_json(&s, 480);
         assert_eq!(j["today"]["total"]["confirmed_ms"], 3_725_000);
         assert_eq!(j["measure"], "unit_time_sum");
+        // on the clock: no run reused anything here, and the stop's hour is clock time
+        assert_eq!(j["today"]["clock_ms"], 3_725_000);
+        assert_eq!(j["today"]["skip_clock_ms"], 0);
+        assert!(text.contains("| on the clock 1:02:05\n"), "{text}");
         assert_eq!(j["today"]["total"]["estimated_ms"], 60_000);
         assert_eq!(j["all"]["stop"]["count"], 2);
         assert_eq!(j["all"]["skip"]["confirmed_ms"], 0);

@@ -116,6 +116,8 @@ fn confirmed_and_estimated_are_apart_and_observe_mode_is_in_no_total() {
     ];
     let s = timesave::summarize(&evs, at, TAIPEI);
     let want = Period {
+        clock_ms: 0,
+        clock_unknown: 0,
         precheck: Sum {
             confirmed_ms: 600_000,
             estimated_ms: 300_000,
@@ -568,4 +570,80 @@ fn a_folder_that_is_there_and_cannot_be_read_is_counted() {
     } else {
         assert_eq!((s.all.precheck.confirmed_ms, s.bad), (5, 0), "{s:?}");
     }
+}
+
+#[test]
+fn on_the_clock_a_run_saved_its_baseline_minus_itself_and_only_when_it_reused() {
+    let at = ms(NOW);
+    let run = |wall_ms, baseline_wall_ms, reused, real| {
+        timesave::run_wall(
+            &ctx(),
+            &timesave::RunWall {
+                wall_ms,
+                baseline_wall_ms,
+                units: 14,
+                reused,
+                real,
+            },
+            at,
+        )
+        .expect("event")
+    };
+    let evs = vec![
+        // reused all: 35 s as a full run, 0.4 s now
+        run(400, Some(35_000), 14, true),
+        // reused some
+        run(14_800, Some(35_000), 10, true),
+        // slower than its baseline (a busy machine): 0, never a negative saving
+        run(40_000, Some(35_000), 3, true),
+        // reused, and no full run of these units to compare with: not known, not 0
+        run(500, None, 14, true),
+        // reused nothing: nothing saved, whatever the clock says
+        run(20_000, Some(35_000), 0, true),
+        // observe mode: nothing was skipped
+        run(400, Some(35_000), 14, false),
+    ];
+    let s = timesave::summarize(&evs, at, TAIPEI);
+    assert_eq!(s.all.clock_ms, 34_600 + 20_200);
+    assert_eq!(s.all.clock_unknown, 1);
+    assert_eq!((s.today.clock_ms, s.bad), (54_800, 0));
+    // the unit-time sums are another measure and are not touched by it
+    assert_eq!(s.all.total(), Sum::default());
+    // more reused than there are units is no run; a run without its wall is not read
+    let over = timesave::RunWall {
+        wall_ms: 1,
+        baseline_wall_ms: None,
+        units: 2,
+        reused: 3,
+        real: true,
+    };
+    assert!(timesave::run_wall(&ctx(), &over, at).is_err());
+    let mut cut = run(400, Some(35_000), 14, true);
+    cut.as_object_mut().expect("object").remove("wall_ms");
+    let mut odd = run(400, Some(35_000), 14, true);
+    odd["mode"] = json!("maybe");
+    // written past the builder: more reused than units, no units, a baseline that is no number
+    let mut over = run(400, Some(35_000), 14, true);
+    over["reused"] = json!(999);
+    let mut no_units = run(400, Some(35_000), 14, true);
+    no_units.as_object_mut().expect("object").remove("units");
+    let mut text_base = run(400, Some(35_000), 14, true);
+    text_base["baseline_wall_ms"] = json!("35000");
+    let s = timesave::summarize(&[cut, odd, over, no_units, text_base], at, TAIPEI);
+    assert_eq!((s.bad, s.all.clock_ms, s.all.clock_unknown), (5, 0, 0));
+    // a run of last week is not in today's box
+    let old = timesave::run_wall(
+        &ctx(),
+        &timesave::RunWall {
+            wall_ms: 0,
+            baseline_wall_ms: Some(9_000),
+            units: 1,
+            reused: 1,
+            real: true,
+        },
+        ms("2026-11-16T02:00:00.000Z"),
+    )
+    .expect("event");
+    let s = timesave::summarize(&[old], at, TAIPEI);
+    assert_eq!((s.today.clock_ms, s.month.clock_ms), (0, 9_000));
 }
