@@ -81,6 +81,7 @@ would_run, decided_in_ms, ledger_problems}`; nothing ran and nothing was written
 | `since` | the time of the earliest saving in `all`; null with none |
 | `observed` | observe-mode predictions: in no box |
 | `unread` | lines and events that could not be read: in no box |
+| `recent` | up to 20 newest real savings (not taken back), each `{at, system, confirmed, saved_ms, avoided, basis}` |
 
 A box:
 

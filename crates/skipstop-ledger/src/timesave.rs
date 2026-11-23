@@ -312,6 +312,19 @@ impl Period {
     }
 }
 
+/// One recent real saving event (not taken back), newest first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentSaving {
+    pub at_ms: i64,
+    pub system: System,
+    pub confirmed: bool,
+    pub saved_ms: u64,
+    pub avoided: String,
+    pub basis: String,
+}
+
+pub const RECENT_CAP: usize = 20;
+
 /// The page's five boxes and what stands beside them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Summary {
@@ -326,6 +339,8 @@ pub struct Summary {
     pub observed: u64,
     /// Lines and events that were not counted because they could not be read as what they claim.
     pub bad: u64,
+    /// Up to [`RECENT_CAP`] newest real savings that were not taken back.
+    pub recent: Vec<RecentSaving>,
 }
 
 /// The starts (UTC milliseconds) of the day, week (Monday), month and year `now_ms` is in, on a
@@ -353,6 +368,8 @@ struct One {
     confirmed: bool,
     real: bool,
     wrong: bool,
+    avoided: String,
+    basis: String,
 }
 
 fn str_of<'a>(o: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
@@ -393,6 +410,8 @@ fn read_saved(o: &Map<String, Value>) -> Option<(String, One)> {
     str_of(o, "basis").filter(|s| !s.trim().is_empty())?;
     str_of(o, "avoided").filter(|s| !s.trim().is_empty())?;
     str_of(o, "rule").filter(|s| word(s))?;
+    let basis = str_of(o, "basis").unwrap_or_default().to_string();
+    let avoided = str_of(o, "avoided").unwrap_or_default().to_string();
     Some((
         id.to_string(),
         One {
@@ -402,6 +421,8 @@ fn read_saved(o: &Map<String, Value>) -> Option<(String, One)> {
             confirmed,
             real,
             wrong: false,
+            avoided,
+            basis,
         },
     ))
 }
@@ -518,7 +539,7 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
             _ => out.bad += 1,
         }
     }
-    for one in saved.values() {
+    for one in saved.into_values() {
         if !one.real {
             out.observed += 1;
             continue;
@@ -538,7 +559,17 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
                 s.count += 1;
             }
         }
+        out.recent.push(RecentSaving {
+            at_ms: one.at,
+            system: one.system,
+            confirmed: one.confirmed,
+            saved_ms: one.ms,
+            avoided: one.avoided,
+            basis: one.basis,
+        });
     }
+    out.recent.sort_by_key(|a| std::cmp::Reverse(a.at_ms));
+    out.recent.truncate(RECENT_CAP);
     for (at, wall, baseline) in walls {
         for (i, hit) in boxes(at).into_iter().enumerate() {
             if hit {
