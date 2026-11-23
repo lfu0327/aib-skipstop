@@ -223,6 +223,20 @@ pub fn saved_json(s: &timesave::Summary, offset_min: i32) -> Value {
             "skip_clock_unknown_runs": p.clock_unknown,
         })
     };
+    let recent: Vec<Value> = s
+        .recent
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "at": skipstop_ledger::envelope::rfc3339_ms(e.at_ms),
+                "system": e.system.as_str(),
+                "confirmed": e.confirmed,
+                "saved_ms": e.saved_ms,
+                "avoided": e.avoided,
+                "basis": e.basis,
+            })
+        })
+        .collect();
     serde_json::json!({
         "v": 1,
         // what total / skip / stop milliseconds are: not time on the clock (clock_ms is)
@@ -233,6 +247,7 @@ pub fn saved_json(s: &timesave::Summary, offset_min: i32) -> Value {
         "since": s.since_ms.map(skipstop_ledger::envelope::rfc3339_ms),
         "observed": s.observed,
         "unread": s.bad,
+        "recent": recent,
     })
 }
 
@@ -499,5 +514,32 @@ mod tests {
         let s = timesave::summarize(&evs, AT, 0);
         assert_eq!(s.all.total(), timesave::Sum::default());
         assert_eq!((s.observed, s.bad), (1, 0));
+        assert!(saved_json(&s, 0)["recent"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn saved_json_lists_newest_real_savings_only() {
+        let mut evs = Vec::new();
+        for i in 0..25 {
+            let unit = format!("u{i}");
+            let mut u = ran(
+                &unit,
+                Some(Would {
+                    from: "repo/tr-1",
+                    source_ms: Some(1_000 + i as u64),
+                    agreed: true,
+                }),
+            );
+            u.reused = true;
+            evs.extend(real(&ctx(), "linux-x86_64", "abc", &[u], AT + i * 1_000));
+        }
+        let s = timesave::summarize(&evs, AT + 30_000, 0);
+        let j = saved_json(&s, 0);
+        let rec = j["recent"].as_array().unwrap();
+        assert_eq!(rec.len(), timesave::RECENT_CAP);
+        assert_eq!(rec[0]["saved_ms"], 1_024);
+        assert_eq!(rec[19]["saved_ms"], 1_005);
+        assert_eq!(rec[0]["system"], "shadow");
+        assert_eq!(rec[0]["confirmed"], true);
     }
 }
