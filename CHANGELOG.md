@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 — 2026-11-23
+
+- `aib-skipstop trial`: what the repo's ledger says of the trial so far (runs, reuses,
+  comparisons that agreed and that differed, real failures found) and the bar for making real
+  mode the default, part by part. It reads; it changes no mode.
+
 ## 0.2.1 — 2026-11-23
 
 - **Fix: a stop's typed saving is an estimate.** A check's `saves_ms` (a number a person wrote in

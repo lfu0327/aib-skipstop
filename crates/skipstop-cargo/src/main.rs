@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--plan] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]\n       aib-skipstop stop [--config <file>] [--mode observe|real] [--no-stop] [--state <dir>] (check | -- <command>...)";
+const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--plan] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]\n       aib-skipstop trial [--json] [--state <dir>]\n       aib-skipstop stop [--config <file>] [--mode observe|real] [--no-stop] [--state <dir>] (check | -- <command>...)";
 
 struct Args {
     packages: Vec<String>,
@@ -33,6 +33,8 @@ struct Args {
     help: bool,
     /// `saved`: print the time-saved boxes instead of running
     saved: bool,
+    /// `trial`: what the ledger says of the trial so far
+    trial: bool,
     /// real mode: a unit with a source that no audit picked is not run
     real: bool,
     /// `--mode` as given on the command line, which wins over everything else
@@ -55,6 +57,7 @@ fn args() -> Result<Args, String> {
         state: None,
         help: false,
         saved: false,
+        trial: false,
         real: false,
         mode_flag: None,
         mode_cmd: None,
@@ -84,6 +87,7 @@ fn args() -> Result<Args, String> {
             "--fresh" => a.fresh = true,
             "--plan" => a.plan_only = true,
             "saved" if !a.saved && a.packages.is_empty() => a.saved = true,
+            "trial" if !a.trial && !a.saved && a.packages.is_empty() => a.trial = true,
             "--utc-offset" => {
                 let v = it.next().ok_or("--utc-offset needs minutes")?;
                 a.utc_offset = v
@@ -180,6 +184,73 @@ fn cargo(root: &Path, a: &[String]) -> Result<std::process::Output, String> {
         .args(a)
         .output()
         .map_err(|e| format!("cargo: {e}"))
+}
+
+/// `aib-skipstop trial`: the repo's ledger as a trial report. It reads; it changes no mode.
+fn trial_report(a: &Args) -> Result<String, String> {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let root = key::repo_root(&cwd).map_err(|e| format!("{e:?}"))?;
+    let (streams, problems) = ledger::streams(&state_root(a).join("ledger"), &repo_id(&root));
+    let t = real::trial(&streams, now_ms() / 1000);
+    let bar = t.meets_the_bar() && problems.is_empty();
+    if a.json {
+        return Ok(format!(
+            "{}\n",
+            serde_json::json!({
+                "v": 1,
+                "first_at": t.first_at_ms.map(skipstop_ledger::envelope::rfc3339_ms),
+                "days": t.days, "runs_real": t.runs_real, "runs_observe": t.runs_observe,
+                "reused": t.reused, "compared": t.compared(), "same": t.same,
+                "differed": t.differed, "incomparable": t.incomparable,
+                "revoked": t.revoked, "reds": t.reds,
+                "ledger_problems": problems,
+                "bar": {"days": real::TRIAL_DAYS, "compared": real::TRIAL_COMPARED,
+                        "reds": real::TRIAL_REDS, "differed": 0, "met": bar},
+            })
+        ));
+    }
+    let mark = |ok: bool| if ok { "met" } else { "not yet" };
+    let mut s = format!(
+        "the trial in this repo's ledger: {} day(s), {} real run(s), {} observe run(s)\n",
+        t.days, t.runs_real, t.runs_observe
+    );
+    s.push_str(&format!(
+        "  reused {} time(s); compared with a real run {} time(s): {} the same, {} differed ({} could not be compared); {} source(s) revoked; {} failure(s) found by a run\n",
+        t.reused, t.compared(), t.same, t.differed, t.incomparable, t.revoked, t.reds
+    ));
+    s.push_str("the bar for making real mode the default (a person's decision; nothing here changes the mode):\n");
+    s.push_str(&format!(
+        "  {:<8} a week of history: {} of {} days\n",
+        mark(t.days >= real::TRIAL_DAYS),
+        t.days,
+        real::TRIAL_DAYS
+    ));
+    s.push_str(&format!(
+        "  {:<8} comparisons: {} of {}\n",
+        mark(t.compared() >= real::TRIAL_COMPARED),
+        t.compared(),
+        real::TRIAL_COMPARED
+    ));
+    s.push_str(&format!(
+        "  {:<8} real failures seen: {} of {}\n",
+        mark(t.reds >= real::TRIAL_REDS),
+        t.reds,
+        real::TRIAL_REDS
+    ));
+    s.push_str(&format!(
+        "  {:<8} comparisons that differed: {} (must be 0)\n",
+        mark(t.differed == 0),
+        t.differed
+    ));
+    for p in &problems {
+        s.push_str(&format!("  not yet  a ledger file cannot be read: {p}\n"));
+    }
+    s.push_str(if bar {
+        "every part is met\n"
+    } else {
+        "not every part is met\n"
+    });
+    Ok(s)
 }
 
 /// Seconds a tool has to say its version.
@@ -455,6 +526,18 @@ fn main() -> ExitCode {
             );
         }
         return ExitCode::SUCCESS;
+    }
+    if a.trial {
+        return match trial_report(&a) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("aib-skipstop: {e}");
+                ExitCode::from(Exit::EngineError.code() as u8)
+            }
+        };
     }
     match run(&a) {
         Ok(e) => ExitCode::from(e.code() as u8),

@@ -94,6 +94,20 @@ A box:
 Show `clock_ms` as "time saved". The unit-time numbers add up work that ran side by side and are
 larger than the clock.
 
+## `aib-skipstop trial --json` (`"v": 1`)
+
+What this repo's ledger says of the trial so far. It reads; it changes no mode.
+
+| field | |
+|---|---|
+| `first_at`, `days` | the first finished run, and whole days since |
+| `runs_real`, `runs_observe` | finished runs (a killed run is not counted) |
+| `reused` | units not run |
+| `compared`, `same`, `differed` | a real run set beside the source it was (or would have been) reused from: audits in real mode, every run in observe mode. `differed` = a reuse that would have been wrong |
+| `incomparable`, `revoked`, `reds` | audits that could not be compared; sources revoked; units that ran and failed |
+| `ledger_problems` | ledger files that could not be read |
+| `bar` | `{days, compared, reds, differed, met}`: the bar for making real mode the default (7 days, 50 comparisons, 3 real failures seen, 0 that differed, no ledger problem) and whether every part is met |
+
 ## The project's settings: `skipstop.json` at the repo's root
 
 No file: the defaults. A key that is not below, a value out of range, a key written twice, or a
