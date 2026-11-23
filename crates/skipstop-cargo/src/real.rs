@@ -142,6 +142,37 @@ pub fn revoked_sources(streams: &[Stream]) -> Vec<(String, String)> {
     v
 }
 
+/// How long a finished run took on the clock: from its plan to its last unit line (the unit
+/// lines are written when the run is over). None for a run that did not finish.
+pub fn stream_wall_ms(s: &Stream) -> Option<u64> {
+    if !s.complete() {
+        return None;
+    }
+    let last = s.units.iter().map(|(at, _)| *at).max()?;
+    u64::try_from(last - s.at_ms).ok()
+}
+
+/// What these units take on the clock when every one of them runs: the wall time of the
+/// newest finished run of exactly these units in which each one ran for real. None when
+/// there is no such run: a saving on the clock is then not known, and is not made up.
+pub fn baseline_wall_ms(streams: &[Stream], units: &[String]) -> Option<u64> {
+    let mut want: Vec<&str> = units.iter().map(String::as_str).collect();
+    want.sort_unstable();
+    streams
+        .iter()
+        // every line of the run ran for real: one reused or skipped unit and it is no full run
+        .filter(|s| s.units.iter().all(|(_, u)| u.how == How::Ran))
+        // and its units are exactly these, no more and no fewer
+        .filter(|s| {
+            let mut had: Vec<&str> = s.units.iter().map(|(_, u)| u.unit.as_str()).collect();
+            had.sort_unstable();
+            had == want
+        })
+        .filter_map(|s| Some((s.at_ms, stream_wall_ms(s)?)))
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, wall)| wall)
+}
+
 /// (audited, candidates) of the one kind there is: a candidate is a line that ran with a
 /// source to compare against or was reused.
 pub fn kind_counts(streams: &[Stream]) -> KindCounts {
@@ -528,6 +559,55 @@ mod tests {
         let mut elsewhere = plain(DAY_MS, vec![red]);
         elsewhere.plan.host = "linux-x86_64".into();
         assert!(!flaky_unit(&[round(2 * DAY_MS, &["a"]), elsewhere], "a"));
+    }
+
+    #[test]
+    fn the_baseline_is_the_newest_finished_run_in_which_exactly_these_units_all_ran() {
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let full = |ago, wall: i64, units: &[&str]| {
+            let mut s = round(ago, units);
+            for (at, _) in &mut s.units {
+                *at = s.at_ms + wall;
+            }
+            s
+        };
+        let st = [
+            full(3 * DAY_MS, 35_000, &["a", "b"]),
+            // newer, and one of them was reused: not a full run
+            plain(
+                2 * DAY_MS,
+                vec![unit("a", How::Ran, None), unit("b", How::Reused, None)],
+            ),
+            // newer, another set of units
+            full(DAY_MS, 9_000, &["a", "b", "c"]),
+            full(DAY_MS, 1_000, &["a"]),
+        ];
+        assert_eq!(baseline_wall_ms(&st, &names(&["b", "a"])), Some(35_000));
+        assert_eq!(baseline_wall_ms(&st, &names(&["a", "b", "c"])), Some(9_000));
+        assert_eq!(baseline_wall_ms(&st, &names(&["b"])), None);
+        // a run of these two and a third that was reused is not a full run of these two: its
+        // wall holds the third unit's share and it was not "every unit ran"
+        let mixed = [plain(
+            DAY_MS,
+            vec![
+                unit("a", How::Ran, None),
+                unit("b", How::Ran, None),
+                unit("c", How::Reused, None),
+            ],
+        )];
+        assert_eq!(baseline_wall_ms(&mixed, &names(&["a", "b"])), None);
+        assert_eq!(baseline_wall_ms(&mixed, &names(&["a", "b", "c"])), None);
+        // the newest full run of the set wins
+        let two = [
+            full(3 * DAY_MS, 35_000, &["a", "b"]),
+            full(DAY_MS, 20_000, &["a", "b"]),
+        ];
+        assert_eq!(baseline_wall_ms(&two, &names(&["a", "b"])), Some(20_000));
+        // a run that was killed has no wall
+        let mut killed = full(DAY_MS, 5_000, &["a", "b"]);
+        killed.ended = None;
+        assert_eq!(stream_wall_ms(&killed), None);
+        assert_eq!(baseline_wall_ms(&[killed], &names(&["a", "b"])), None);
     }
 
     #[test]

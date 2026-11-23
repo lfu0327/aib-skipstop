@@ -490,8 +490,8 @@
    "id": "cargo-TB5",
    "why": "a revoked source's savings stay in the total: nothing is written to take them back",
    "file": "crates/skipstop-cargo/src/main.rs",
-   "old": "    for ev in evs.into_iter().chain(taken_back) {",
-   "new": "    for ev in evs.into_iter().chain(taken_back.into_iter().take(0)) {",
+   "old": "    for ev in evs.into_iter().chain(taken_back).chain(wall_ev) {",
+   "new": "    for ev in evs.into_iter().chain(taken_back.into_iter().take(0)).chain(wall_ev) {",
    "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
    "cmd": [
     "cargo",
@@ -701,6 +701,55 @@
     "--locked",
     "--test",
     "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-BL1",
+   "why": "a run in which a unit was reused, or of other units, is taken as the full run to compare with",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "            had == want",
+   "new": "            !had.is_empty() && !want.is_empty()",
+   "test": "the_baseline_is_the_newest_finished_run_in_which_exactly_these_units_all_ran",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CK4",
+   "why": "a run does not write how long it took on the clock: the clock measure stays empty",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    for ev in evs.into_iter().chain(taken_back).chain(wall_ev) {",
+   "new": "    for ev in evs.into_iter().chain(taken_back).chain(wall_ev.filter(|_| false)) {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-BL2",
+   "why": "a run in which one unit was only reused is taken as a full run",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        .filter(|s| s.units.iter().all(|(_, u)| u.how == How::Ran))",
+   "new": "        .filter(|s| s.units.iter().any(|(_, u)| u.how == How::Ran))",
+   "test": "the_baseline_is_the_newest_finished_run_in_which_exactly_these_units_all_ran",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
    ]
   }
  ]

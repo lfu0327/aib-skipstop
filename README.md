@@ -62,6 +62,11 @@ from, added up. Tests run side by side, so this is more than the time saved on t
 14-package run here: 35 s on the clock, about three times that as unit time). The output says
 so in its first line, and the JSON as `"measure": "unit_time_sum"`.
 
+The time on the clock is given beside it (`on the clock`, `clock_ms`): for a run that reused
+something, the wall time of the last full run of the same units minus its own, never under 0;
+a run with no full run to compare with is counted as not known. A stop's saving is clock time
+already (what the stopped command would have taken).
+
 ### Real mode
 
 ```sh

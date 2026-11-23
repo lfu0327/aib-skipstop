@@ -234,8 +234,47 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
         .as_str()
         .is_some_and(|f| !f.is_empty()));
     assert_eq!(saved(&t)["all"]["skip"]["count"], 2);
-    // nextest was not called for them: no test case ran at all
-    assert_eq!(r.json["cases_run"], 0, "{}", r.json);
+    // on the clock: this run is compared with the full run of the same two units before it.
+    // One run_wall per run; the first has no full run before it, the second names the first's
+    // wall as its baseline, and the sum is exactly that baseline minus the second's own wall
+    let events = fs::read_dir(t.0.join("state/events"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .unwrap();
+    let walls: Vec<serde_json::Value> = fs::read_to_string(events)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .filter(|v| v["kind"] == "run_wall")
+        .collect();
+    assert_eq!(walls.len(), 2, "{walls:?}");
+    assert!(walls[0].get("baseline_wall_ms").is_none(), "{}", walls[0]);
+    assert_eq!(
+        (walls[0]["units"].as_u64(), walls[0]["reused"].as_u64()),
+        (Some(2), Some(0))
+    );
+    assert_eq!(
+        (walls[1]["units"].as_u64(), walls[1]["reused"].as_u64()),
+        (Some(2), Some(2))
+    );
+    let base = walls[1]["baseline_wall_ms"]
+        .as_u64()
+        .expect("the first run is its baseline");
+    let wall = walls[1]["wall_ms"].as_u64().unwrap();
+    assert!(
+        base > 0,
+        "a run that built and ran two crates took time: {}",
+        walls[1]
+    );
+    let s = saved(&t);
+    assert_eq!(
+        s["all"]["skip_clock_ms"].as_u64(),
+        Some(base.saturating_sub(wall)),
+        "{s}"
+    );
+    assert_eq!(s["all"]["skip_clock_unknown_runs"], 0, "{s}");
 
     // a round of one package is no round for the others: a third crate, added and committed,
     // is new to real mode and runs as its own round while a and b are reused

@@ -15,6 +15,7 @@
 //! | `time_saved_confirm` | `ref`: the id of a `time_saved` that was an estimate and has since been checked |
 //! | `time_saved_wrong` | `ref`, `penalty_ms`, `basis`: that saving was a wrong block / a wrong reuse |
 //! | `unit_time` | `unit`, `ms`, `runner`, `size` and `load1` (may be absent) |
+//! | `run_wall` | one run on the clock: `wall_ms`, `baseline_wall_ms` (the last run of the same units in which every one ran; absent when there is none), `units`, `reused`, `mode` |
 //!
 //! Adding up ([`summarize`]):
 //! - `mode = observe` is never in a total: a prediction that did nothing. It is counted beside.
@@ -23,6 +24,11 @@
 //! - a saving a `time_saved_wrong` names is taken out of both, and the penalty is its own number.
 //! - a box holds what happened in it: the saving by its own time, the penalty by the time it
 //!   was found out. Weeks start on Monday; the caller gives the clock's offset from UTC.
+//! - **on the clock**: a saving's `saved_ms` is the skipped unit's own run time, and units run
+//!   side by side, so their sum is more than the clock would show. What a real run saved on the
+//!   clock is its `run_wall`: the baseline's wall minus its own (never under 0), counted only
+//!   when the run reused something and has a baseline; a run that reused and has none is
+//!   counted as "not known", not as 0.
 //! - a line that is not understood, an event whose fields do not fit, a `ref` that names
 //!   nothing, a second confirm / wrong for one saving, an event dated after the reader's clock
 //!   (five minutes are allowed for another machine's clock), a folder that is there and cannot
@@ -39,6 +45,7 @@ pub const KIND_SAVED: &str = "time_saved";
 pub const KIND_CONFIRM: &str = "time_saved_confirm";
 pub const KIND_WRONG: &str = "time_saved_wrong";
 pub const KIND_UNIT: &str = "unit_time";
+pub const KIND_RUN: &str = "run_wall";
 
 /// Which of the two systems saved the time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -228,6 +235,36 @@ pub fn unit_time(ctx: &Ctx, u: &Unit<'_>, at_ms: i64) -> Result<Value, String> {
     Ok(events::build(ctx, KIND_UNIT, u.outcome, at_ms, m))
 }
 
+/// One run on the clock, as its runner knows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunWall {
+    pub wall_ms: u64,
+    /// The wall time of the last run of the same units in which every one of them ran.
+    pub baseline_wall_ms: Option<u64>,
+    pub units: u64,
+    pub reused: u64,
+    pub real: bool,
+}
+
+/// The `run_wall` event. `reused` over `units` is an error, not a run.
+pub fn run_wall(ctx: &Ctx, r: &RunWall, at_ms: i64) -> Result<Value, String> {
+    if r.reused > r.units {
+        return Err(format!("{} reused of {} units", r.reused, r.units));
+    }
+    let mut m = Map::new();
+    m.insert("wall_ms".into(), json!(r.wall_ms));
+    if let Some(b) = r.baseline_wall_ms {
+        m.insert("baseline_wall_ms".into(), json!(b));
+    }
+    m.insert("units".into(), json!(r.units));
+    m.insert("reused".into(), json!(r.reused));
+    m.insert(
+        "mode".into(),
+        json!(if r.real { "real" } else { "observe" }),
+    );
+    Ok(events::build(ctx, KIND_RUN, "ran", at_ms, m))
+}
+
 /// One box's numbers for one system.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Sum {
@@ -255,6 +292,10 @@ impl Sum {
 pub struct Period {
     pub precheck: Sum,
     pub shadow: Sum,
+    /// What real runs that reused something saved on the clock (baseline wall − their wall).
+    pub clock_ms: u64,
+    /// Real runs that reused something and have no baseline: saved, by a time nobody knows.
+    pub clock_unknown: u64,
 }
 
 impl Period {
@@ -384,6 +425,8 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
     // confirms and wrongs in the order they were given: (the saving's id, None = a confirm,
     // Some = a wrong with when it was found out and what it cost)
     let mut marks: Vec<(String, Option<(i64, u64)>)> = Vec::new();
+    // real runs that reused something: (when, wall, baseline wall)
+    let mut walls: Vec<(i64, u64, Option<u64>)> = Vec::new();
     // a clock a little ahead on another machine is not a future event; anything later is unread
     let latest = now_ms.saturating_add(FUTURE_SLACK_MS);
     for v in evs {
@@ -409,6 +452,38 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
                 match (read_mark(o), p, basis) {
                     (Some((r, at)), Some(p), Some(_)) if at <= latest => {
                         marks.push((r, Some((at, p))));
+                    }
+                    _ => out.bad += 1,
+                }
+            }
+            Some(KIND_RUN) => {
+                let n = |k: &str| o.get(k).and_then(Value::as_u64);
+                // a baseline that is there must be a whole number; one that is absent is "none"
+                let baseline = match o.get("baseline_wall_ms") {
+                    None => Some(None),
+                    Some(v) => v.as_u64().map(Some),
+                };
+                let mode = str_of(o, "mode").filter(|m| matches!(*m, "real" | "observe"));
+                match (
+                    common(o),
+                    n("wall_ms"),
+                    n("units"),
+                    n("reused"),
+                    baseline,
+                    mode,
+                ) {
+                    (
+                        Some((_, at)),
+                        Some(wall),
+                        Some(units),
+                        Some(reused),
+                        Some(base),
+                        Some(mode),
+                    ) if at <= latest && reused <= units => {
+                        // an observe run skipped nothing; a run that reused nothing saved nothing
+                        if mode == "real" && reused > 0 {
+                            walls.push((at, wall, base));
+                        }
                     }
                     _ => out.bad += 1,
                 }
@@ -461,6 +536,19 @@ pub fn summarize(evs: &[Value], now_ms: i64, offset_min: i32) -> Summary {
                     s.estimated_ms = s.estimated_ms.saturating_add(one.ms);
                 }
                 s.count += 1;
+            }
+        }
+    }
+    for (at, wall, baseline) in walls {
+        for (i, hit) in boxes(at).into_iter().enumerate() {
+            if hit {
+                match baseline {
+                    Some(b) => {
+                        periods[i].clock_ms =
+                            periods[i].clock_ms.saturating_add(b.saturating_sub(wall));
+                    }
+                    None => periods[i].clock_unknown += 1,
+                }
             }
         }
     }

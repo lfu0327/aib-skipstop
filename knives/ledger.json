@@ -485,6 +485,74 @@
     "--test",
     "timesave"
    ]
+  },
+  {
+   "id": "ledger-CK1",
+   "why": "a run's own wall time is counted as saved (the whole baseline, not the difference)",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                            periods[i].clock_ms.saturating_add(b.saturating_sub(wall));",
+   "new": "                            periods[i].clock_ms.saturating_add(b.max(wall));",
+   "test": "on_the_clock_a_run_saved_its_baseline_minus_itself_and_only_when_it_reused",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-CK2",
+   "why": "a run that reused nothing, or an observe run, is counted as a saving on the clock",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                        if mode == \"real\" && reused > 0 {",
+   "new": "                        if mode == \"real\" || reused > 0 {",
+   "test": "on_the_clock_a_run_saved_its_baseline_minus_itself_and_only_when_it_reused",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-CK3",
+   "why": "a run with no full run to compare with is counted as having saved nothing, not as unknown",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                    None => periods[i].clock_unknown += 1,",
+   "new": "                    None => periods[i].clock_unknown += 0,",
+   "test": "on_the_clock_a_run_saved_its_baseline_minus_itself_and_only_when_it_reused",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
+  },
+  {
+   "id": "ledger-CK5",
+   "why": "a run that says it reused more units than it has is added up",
+   "file": "crates/skipstop-ledger/src/timesave.rs",
+   "old": "                    ) if at <= latest && reused <= units => {",
+   "new": "                    ) if at <= latest && (reused <= units || units > 0) => {",
+   "test": "on_the_clock_a_run_saved_its_baseline_minus_itself_and_only_when_it_reused",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-ledger",
+    "--locked",
+    "--test",
+    "timesave"
+   ]
   }
  ]
 }

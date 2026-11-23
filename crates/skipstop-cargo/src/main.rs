@@ -749,7 +749,17 @@ fn run(a: &Args) -> Result<Exit, String> {
     } else {
         skipstop_cargo::run_events::observe(&ctx, &plan.host, &head, &ran, at)
     };
-    for ev in evs.into_iter().chain(taken_back) {
+    // the run on the clock, beside what a full run of the same units took: the only measure
+    // of a saving that is time on the clock (unit times add up to more: units run side by side)
+    let wall = skipstop_ledger::timesave::RunWall {
+        wall_ms: u64::try_from(at - plan_started).unwrap_or(0),
+        baseline_wall_ms: real::baseline_wall_ms(&streams, &chosen),
+        units: rows.len() as u64,
+        reused: rows.iter().filter(|r| !r.plan.runs()).count() as u64,
+        real: a.real,
+    };
+    let wall_ev = skipstop_ledger::timesave::run_wall(&ctx, &wall, at).ok();
+    for ev in evs.into_iter().chain(taken_back).chain(wall_ev) {
         // for people to read, never a gate: a write that fails is said and changes nothing
         if let Err(e) = skipstop_ledger::events::append_in(&events_dir, &ev, at) {
             eprintln!("aib-skipstop: event not written: {e}");
