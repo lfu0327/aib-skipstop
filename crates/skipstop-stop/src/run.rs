@@ -50,12 +50,25 @@ fn kill_tree(child: &mut std::process::Child) {
 /// Runs one check's command in `dir`, with nothing on its stdin and its output kept off the
 /// terminal, and ends it and what it started at its time limit.
 pub fn run_check(dir: &Path, c: &Check) -> Ended {
-    let mut cmd = Command::new(&c.cmd[0]);
-    cmd.args(&c.cmd[1..])
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    run_argv(dir, &c.cmd, c.timeout_s, false)
+}
+
+/// Runs `argv` in `dir` with nothing on its stdin, and ends it and what it started at
+/// `timeout_s`. `show`: what it prints goes to this program's standard error, both streams
+/// (standard output stays this program's own); otherwise it is kept off the terminal.
+/// An empty `argv` did not start.
+pub fn run_argv(dir: &Path, argv: &[String], timeout_s: u64, show: bool) -> Ended {
+    let Some(program) = argv.first() else {
+        return Ended::NoStart("no command".into());
+    };
+    let mut cmd = Command::new(program);
+    cmd.args(&argv[1..]).current_dir(dir).stdin(Stdio::null());
+    if show {
+        cmd.stdout(Stdio::from(std::io::stderr()))
+            .stderr(Stdio::inherit());
+    } else {
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -65,7 +78,7 @@ pub fn run_check(dir: &Path, c: &Check) -> Ended {
         Ok(ch) => ch,
         Err(e) => return Ended::NoStart(e.to_string()),
     };
-    let limit = Duration::from_secs(c.timeout_s);
+    let limit = Duration::from_secs(timeout_s);
     let start = Instant::now();
     loop {
         match child.try_wait() {

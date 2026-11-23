@@ -103,7 +103,22 @@ No file: the defaults. A key that is not below, a value out of range, a key writ
 |---|---|
 | `never_reuse` | `{"<package>": "<class>"}`: packages that run every time whatever their key. Class: `writes_worktree`, `reads_outside` (the network, state outside the repo), `side_effect` (deploys, sends, pushes), `time_random_home` |
 | `defense_period_days` | 1 to 30, default 7: how often every unit runs whatever its key |
+| `units` | `{"<name>": {...}}`: units that are any command, below. A name is letters, digits, `.`, `_`, `-`, and not the name of a package |
 | `keep_days` | 8 to 3650, default 30: how long a run's ledger file is kept |
+
+A unit of `units`:
+
+| key | |
+|---|---|
+| `run` | the command as a list of words (no shell); it passes with exit code 0 |
+| `run_windows` | the list used on Windows instead, when the program has another name there (`npm.cmd`) |
+| `inputs` | needed, not empty: files, or folders ending in `/`, of the repo. The key is their hash, with the settings file's. A name that matches no file leaves the unit with no key: it runs every time and says why |
+| `env` | variables whose value is part of the key |
+| `tools` | commands whose whole output is part of the key (`["node", "--version"]`); one that cannot be run leaves the unit with no key |
+| `timeout_s` | 1 to 86400, default 1800; past it the command and what it started are ended (exit 5) |
+
+In a run's JSON such a unit has `tests: 1`. What it prints goes to standard error. Its audit
+compares the outcome only: there are no cases to compare.
 
 ## The events book: `<state>/events/<YYYY-MM>.jsonl`
 

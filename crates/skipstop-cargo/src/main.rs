@@ -182,6 +182,81 @@ fn cargo(root: &Path, a: &[String]) -> Result<std::process::Output, String> {
         .map_err(|e| format!("cargo: {e}"))
 }
 
+/// Seconds a tool has to say its version.
+const TOOL_LIMIT_S: u64 = 20;
+
+/// What a tool says of itself (`node --version`), as one line for the key: the command and
+/// the sha256 of each of its two streams, bytes as they came. A tool that cannot be run, does
+/// not end well or is not done in [`TOOL_LIMIT_S`] gives no line: the unit then has no key
+/// and runs.
+fn tool_text(root: &Path, argv: &[String]) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    use std::process::Stdio;
+    let name = &argv[0];
+    let mut child = Command::new(name)
+        .current_dir(root)
+        .args(&argv[1..])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("tool {name}: {e}"))?;
+    // read both streams as they come, so a tool that prints much does not wait on a full pipe
+    let read = |s: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut h = Sha256::new();
+            let mut buf = [0u8; 8192];
+            if let Some(mut s) = s {
+                while let Ok(n) = s.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    h.update(&buf[..n]);
+                }
+            }
+            h.finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        })
+    };
+    let out = read(
+        child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>),
+    );
+    let err = read(
+        child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>),
+    );
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if start.elapsed().as_secs() >= TOOL_LIMIT_S => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("tool {name}: not done in {TOOL_LIMIT_S} s"));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            Err(e) => return Err(format!("tool {name}: {e}")),
+        }
+    };
+    if !status.success() {
+        return Err(format!("tool {name}: {status}"));
+    }
+    let (out, err) = (
+        out.join().unwrap_or_default(),
+        err.join().unwrap_or_default(),
+    );
+    let said = serde_json::to_string(argv).map_err(|e| e.to_string())?;
+    Ok(format!("{said} {out} {err}"))
+}
+
 fn state_root(a: &Args) -> PathBuf {
     root_from(
         a.state.as_deref(),
@@ -401,34 +476,49 @@ fn run(a: &Args) -> Result<Exit, String> {
     let plan_started = now_ms();
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = key::repo_root(&cwd).map_err(|e| format!("{e:?}"))?;
-    let meta = cargo(
-        &root,
-        &["metadata", "--no-deps", "--format-version", "1", "--locked"].map(String::from),
-    )?;
-    if !meta.status.success() {
-        return Err(format!(
-            "cargo metadata: {}",
-            String::from_utf8_lossy(&meta.stderr).trim()
-        ));
-    }
-    let ws: Workspace = units::parse_metadata(&String::from_utf8_lossy(&meta.stdout))?;
-    let chosen: Vec<String> = if a.packages.is_empty() {
-        ws.packages.iter().map(|p| p.name.clone()).collect()
+    // a cargo workspace when there is one; a repo with none has only the units its settings name
+    let ws: Workspace = if root.join("Cargo.toml").exists() {
+        let meta = cargo(
+            &root,
+            &["metadata", "--no-deps", "--format-version", "1", "--locked"].map(String::from),
+        )?;
+        if !meta.status.success() {
+            return Err(format!(
+                "cargo metadata: {}",
+                String::from_utf8_lossy(&meta.stderr).trim()
+            ));
+        }
+        units::parse_metadata(&String::from_utf8_lossy(&meta.stdout))?
     } else {
-        a.packages.clone()
+        Workspace {
+            root: root.to_string_lossy().into_owned(),
+            target_dir: String::new(),
+            packages: Vec::new(),
+        }
     };
     // the project's own settings; a file that is there and not understood stops the run: it
     // must not run as the defaults instead (a unit said never to be reused would be reused)
     let config = skipstop_cargo::config::load(&root)?;
-    let all: Vec<String> = ws.packages.iter().map(|p| p.name.clone()).collect();
+    let file = skipstop_cargo::config::FILE;
+    let mut all: Vec<String> = ws.packages.iter().map(|p| p.name.clone()).collect();
+    if let Some(twice) = config.units.keys().find(|u| all.contains(u)) {
+        return Err(format!(
+            "{file}: unit {twice:?} has the name of a package of this workspace"
+        ));
+    }
+    all.extend(config.units.keys().cloned());
     let strangers = skipstop_cargo::config::strangers(&config, &all);
     if !strangers.is_empty() {
         return Err(format!(
-            "{}: never_reuse names {} which is no package of this workspace",
-            skipstop_cargo::config::FILE,
+            "{file}: never_reuse names {} which is no package of this workspace and no unit of this file",
             strangers.join(", ")
         ));
     }
+    let chosen: Vec<String> = if a.packages.is_empty() {
+        all.clone()
+    } else {
+        a.packages.clone()
+    };
     if chosen.is_empty() {
         return Ok(Exit::ZeroUnits);
     }
@@ -453,6 +543,30 @@ fn run(a: &Args) -> Result<Exit, String> {
     for name in &chosen {
         let k = (|| -> Result<String, String> {
             let all = all.as_ref().map_err(|e| format!("{e:?}"))?;
+            if let Some(u) = config.units.get(name) {
+                // a command: its key is the command, what its tools say, the variables and
+                // files its settings name, and the settings file itself
+                let mut tools = String::from("no tools named");
+                for t in &u.tools {
+                    tools.push('\n');
+                    tools.push_str(&tool_text(&root, t)?);
+                }
+                let ctx = Context {
+                    machine_kind: ctx.machine_kind.clone(),
+                    toolchain: tools,
+                    vars: u.env.clone(),
+                    target_dir: String::new(),
+                    target_shared: false,
+                };
+                let ch = ctx.hash(&env).map_err(|e| format!("{e:?}"))?;
+                let mut pre = u.inputs.clone();
+                pre.push(file.to_string());
+                let paths = key::declared(all, &pre).map_err(|e| format!("{e:?}"))?;
+                let inputs =
+                    key::input_list(&root, &paths, &mut cache).map_err(|e| format!("{e:?}"))?;
+                let def = serde_json::to_string(&u.run).map_err(|e| e.to_string())?;
+                return Ok(key::key(&format!("command {def}"), &ch, &inputs));
+            }
             let ch = chash.as_ref().map_err(|e| format!("{e:?}"))?;
             let pre = ws.inputs(name, &present)?;
             let paths = key::declared(all, &pre).map_err(|e| format!("{e:?}"))?;
@@ -576,7 +690,10 @@ fn run(a: &Args) -> Result<Exit, String> {
     let (cfg, jp) = run_files(&state_abs, std::process::id());
     std::fs::write(&cfg, tool_config(&jp)?).map_err(|e| e.to_string())?;
     let mut select = Vec::new();
-    for r in rows.iter().filter(|r| r.plan.runs()) {
+    for r in rows
+        .iter()
+        .filter(|r| r.plan.runs() && !config.units.contains_key(&r.unit))
+    {
         select.push("-p".to_string());
         select.push(r.unit.clone());
     }
@@ -589,6 +706,20 @@ fn run(a: &Args) -> Result<Exit, String> {
         let _ = std::fs::remove_file(&cfg);
         (skipstop_cargo::List::default(), Vec::new(), false)
     };
+
+    // the units that are a command, one after another: what each prints goes to standard
+    // error (standard output is this program's own)
+    let mut commands: BTreeMap<String, (skipstop_stop::Ended, u64)> = BTreeMap::new();
+    for r in rows.iter().filter(|r| r.plan.runs()) {
+        if let Some(u) = config.units.get(&r.unit) {
+            let t0 = now_ms();
+            let ended = skipstop_stop::run::run_argv(&root, &u.run, u.timeout_s, true);
+            commands.insert(
+                r.unit.clone(),
+                (ended, u64::try_from(now_ms() - t0).unwrap_or(0)),
+            );
+        }
+    }
 
     // read the result back per package
     let mut per: BTreeMap<String, (Vec<_>, Vec<_>)> = BTreeMap::new();
@@ -610,6 +741,46 @@ fn run(a: &Args) -> Result<Exit, String> {
             // not run: the source's result stands (a source is a pass on a clean tree)
             r.result = Outcome::Pass;
             outcomes.push(RunOutcome::Reused);
+            continue;
+        }
+        if let Some((ended, ms)) = commands.remove(&r.unit) {
+            // a command is one test: it passes with exit code 0. There are no cases to
+            // compare; an audit of it compares the outcome
+            use skipstop_stop::Ended;
+            r.ms = ms;
+            r.ran = 1;
+            let met = matches!(ended, Ended::Code(0));
+            r.result = if met { Outcome::Pass } else { Outcome::Fail };
+            match &ended {
+                Ended::Code(0) => {}
+                Ended::Code(n) => eprintln!("aib-skipstop: {}: exit code {n}", r.unit),
+                Ended::Signal => eprintln!("aib-skipstop: {}: ended by a signal", r.unit),
+                Ended::Timeout => {
+                    eprintln!("aib-skipstop: {}: ran past its time and was ended", r.unit)
+                }
+                Ended::NoStart(e) => eprintln!("aib-skipstop: {}: did not start: {e}", r.unit),
+            }
+            if let Some(src) = &r.source {
+                let audit = Verdict {
+                    outcome: audit_outcome(r.result),
+                    tests_ran: Some(1),
+                    failed: Vec::new(),
+                    output_digest: String::new(),
+                    censored: false,
+                };
+                r.audit = Some(audit_of(&audit, src, met));
+            }
+            outcomes.push(if ended == Ended::Timeout {
+                RunOutcome::TimedOut
+            } else {
+                RunOutcome::Ran {
+                    met,
+                    tests_ran: Some(1),
+                }
+            });
+            if a.real && r.audit.as_ref().is_some_and(|x| x.revoke) {
+                outcomes.push(RunOutcome::SpotCheckDiffers);
+            }
             continue;
         }
         let (l, c) = per.remove(&r.unit).unwrap_or_default();
@@ -992,9 +1163,6 @@ fn audit_outcome(o: Outcome) -> AuditOutcome {
     }
 }
 
-/// The audit line for one unit. A source line written before the ledger had `tests_ran`
-/// (None) cannot be compared: Incomparable and never revoked, or the first run after an
-/// upgrade would revoke every old source as a false mismatch (5d33a 598ce962 L1).
 /// The cases line this run brings to its audit: its own when the source has one, none when
 /// the source has none (a ledger written before the line was taken). An old source is then
 /// compared on outcome, count and failed names as it always was, not revoked for lacking a
@@ -1007,6 +1175,9 @@ fn cases_to_compare(source: &str, now: &str) -> String {
     }
 }
 
+/// The audit line for one unit. A source line written before the ledger had `tests_ran`
+/// (None) cannot be compared: Incomparable and never revoked, or the first run after an
+/// upgrade would revoke every old source as a false mismatch (5d33a 598ce962 L1).
 fn audit_of(audit: &Verdict, source: &Verdict, met: bool) -> Audit {
     if source.tests_ran.is_none() {
         return Audit {
@@ -1199,6 +1370,29 @@ mod tests {
         assert_eq!(root_from(None, Some(""), Some("/a"), home), led("/a"));
         assert_eq!(root_from(None, None, Some(""), home), led("/h/.ez2-aib"));
         assert_eq!(root_from(None, None, None, None), led("./.ez2-aib"));
+    }
+
+    #[test]
+    fn a_tool_s_line_is_of_its_command_and_of_each_stream_apart() {
+        let git = |args: &[&str]| {
+            let mut v = vec!["git".to_string()];
+            v.extend(args.iter().map(|s| s.to_string()));
+            tool_text(Path::new("."), &v)
+        };
+        let a = git(&["--version"]).expect("git is here");
+        assert_eq!(a, git(&["--version"]).expect("git is here"));
+        // the command, then two sha256: standard output, standard error (nothing: the empty hash)
+        let parts: Vec<&str> = a.rsplitn(3, ' ').collect();
+        assert_eq!((parts[0].len(), parts[1].len()), (64, 64), "{a}");
+        assert_eq!(
+            parts[0],
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_ne!(parts[1], parts[0]);
+        assert_eq!(parts[2], r#"["git","--version"]"#);
+        // a tool that does not end well, and one that is not there, give no line
+        assert!(git(&["no-such-git-command-skipstop"]).is_err());
+        assert!(tool_text(Path::new("."), &["no-such-program-skipstop".to_string()]).is_err());
     }
 
     #[test]

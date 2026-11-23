@@ -294,8 +294,8 @@
    "id": "cargo-RM1",
    "why": "every unit is handed to nextest, reused or not (nothing is saved, the run only says so)",
    "file": "crates/skipstop-cargo/src/main.rs",
-   "old": "    for r in rows.iter().filter(|r| r.plan.runs()) {",
-   "new": "    for r in rows.iter().filter(|r| r.plan.runs() || !r.unit.is_empty()) {",
+   "old": "        .filter(|r| r.plan.runs() && !config.units.contains_key(&r.unit))",
+   "new": "        .filter(|r| !r.unit.is_empty() && !config.units.contains_key(&r.unit))",
    "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
    "cmd": [
     "cargo",
@@ -978,6 +978,122 @@
     "--locked",
     "--bin",
     "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-CU1",
+   "why": "a command that ends with another code than 0 passes",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "            let met = matches!(ended, Ended::Code(0));",
+   "new": "            let met = matches!(ended, Ended::Code(_));",
+   "test": "a_command_is_a_unit_reused_while_its_named_files_stand_and_run_when_they_change",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "command_units"
+   ]
+  },
+  {
+   "id": "cargo-CU2",
+   "why": "a command unit is handed to nextest as a package",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        .filter(|r| r.plan.runs() && !config.units.contains_key(&r.unit))",
+   "new": "        .filter(|r| r.plan.runs())",
+   "test": "a_command_is_a_unit_reused_while_its_named_files_stand_and_run_when_they_change",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "command_units"
+   ]
+  },
+  {
+   "id": "cargo-CU3",
+   "why": "a command unit with no inputs is taken: one key for ever",
+   "file": "crates/skipstop-cargo/src/config.rs",
+   "old": "    if u.inputs.is_empty() {",
+   "new": "    if u.inputs.is_empty() && u.run.is_empty() {",
+   "test": "a_command_unit_says_its_command_and_its_inputs_or_it_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CU4",
+   "why": "an input may leave the repo",
+   "file": "crates/skipstop-cargo/src/config.rs",
+   "old": "            .all(|part| !part.is_empty() && part != \".\" && part != \"..\")",
+   "new": "            .all(|part| !part.is_empty() && part != \".\")",
+   "test": "a_command_unit_says_its_command_and_its_inputs_or_it_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CU5",
+   "why": "run_windows is the command on every system",
+   "file": "crates/skipstop-cargo/src/config.rs",
+   "old": "        Some(w) if windows => w,",
+   "new": "        Some(w) if !windows => w,",
+   "test": "a_command_unit_says_its_command_and_its_inputs_or_it_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CU6",
+   "why": "a tool that did not end well still gives a line for the key",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if !status.success() {\n        return Err(format!(\"tool {name}: {status}\"));",
+   "new": "    if !status.success() && name.is_empty() {\n        return Err(format!(\"tool {name}: {status}\"));",
+   "test": "a_tool_s_line_is_of_its_command_and_of_each_stream_apart",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-CU7",
+   "why": "a unit may have the name of a package",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if let Some(twice) = config.units.keys().find(|u| all.contains(u)) {",
+   "new": "    if let Some(twice) = config.units.keys().find(|u| all.contains(u) && u.is_empty()) {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
    ]
   }
  ]
