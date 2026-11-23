@@ -173,6 +173,27 @@ pub fn baseline_wall_ms(streams: &[Stream], units: &[String]) -> Option<u64> {
         .map(|(_, wall)| wall)
 }
 
+/// Days a finished run's ledger file is kept. Nothing older is asked any more: a source that
+/// old is audited before it is reused, and a defense round is weekly.
+pub const KEEP_DAYS: i64 = 30;
+
+/// The runs whose ledger files may go: started more than `keep_days` ago, and holding no
+/// revocation. A file with a revocation is kept for good: it is what makes "a key a real run
+/// disagreed on is never a source again" outlast the days. The events book is not touched by
+/// this: its savings are what "this year" and "since the start" are added up from.
+pub fn expired(streams: &[Stream], keep_days: i64, now_s: i64) -> Vec<&Stream> {
+    let cutoff_ms = (now_s - keep_days * 86_400) * 1000;
+    streams
+        .iter()
+        .filter(|s| s.at_ms < cutoff_ms)
+        .filter(|s| {
+            !s.units
+                .iter()
+                .any(|(_, u)| u.audit.as_ref().is_some_and(|a| a.revoke))
+        })
+        .collect()
+}
+
 /// (audited, candidates) of the one kind there is: a candidate is a line that ran with a
 /// source to compare against or was reused.
 pub fn kind_counts(streams: &[Stream]) -> KindCounts {
@@ -608,6 +629,32 @@ mod tests {
         killed.ended = None;
         assert_eq!(stream_wall_ms(&killed), None);
         assert_eq!(baseline_wall_ms(&[killed], &names(&["a", "b"])), None);
+    }
+
+    #[test]
+    fn old_runs_may_go_and_one_that_holds_a_revocation_never_does() {
+        let old = plain(31 * DAY_MS, vec![unit("a", How::Ran, None)]);
+        let old_revoke = plain(
+            400 * DAY_MS,
+            vec![unit("a", How::Ran, Some(AuditCompare::Mismatch))],
+        );
+        let old_same = plain(
+            40 * DAY_MS,
+            vec![unit("a", How::Ran, Some(AuditCompare::Same))],
+        );
+        let recent = plain(29 * DAY_MS, vec![unit("a", How::Ran, None)]);
+        let st = [old.clone(), old_revoke, old_same.clone(), recent];
+        let gone: Vec<&str> = expired(&st, KEEP_DAYS, NOW_S)
+            .iter()
+            .map(|s| s.invocation_id.as_str())
+            .collect();
+        assert_eq!(
+            gone,
+            vec![old.invocation_id.as_str(), old_same.invocation_id.as_str()]
+        );
+        // kept for ever at any age; nothing goes when everything is recent
+        assert!(expired(&st[1..2], 1, NOW_S).is_empty());
+        assert!(expired(&st[3..], KEEP_DAYS, NOW_S).is_empty());
     }
 
     #[test]

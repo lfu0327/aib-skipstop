@@ -751,6 +751,38 @@
     "--locked",
     "--lib"
    ]
+  },
+  {
+   "id": "cargo-EX1",
+   "why": "an old run that holds a revocation is deleted: the key it revoked can be a source again",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "            !s.units\n                .iter()\n                .any(|(_, u)| u.audit.as_ref().is_some_and(|a| a.revoke))",
+   "new": "            !s.units\n                .iter()\n                .any(|(_, u)| u.audit.as_ref().is_some_and(|a| a.revoke && false))",
+   "test": "old_runs_may_go_and_one_that_holds_a_revocation_never_does",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-EX2",
+   "why": "a recent run's ledger file is deleted",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        .filter(|s| s.at_ms < cutoff_ms)",
+   "new": "        .filter(|s| s.at_ms < cutoff_ms || s.at_ms > 0)",
+   "test": "old_runs_may_go_and_one_that_holds_a_revocation_never_does",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
   }
  ]
 }
