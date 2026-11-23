@@ -767,6 +767,16 @@ fn run(a: &Args) -> Result<Exit, String> {
         }
     }
 
+    // old ledger files go (never one that holds a revocation, never one that could not be
+    // read: that one is a problem to be looked at, and it is not in `streams`)
+    let mut expired_files = 0;
+    for s in real::expired(&streams, real::KEEP_DAYS, now_ms() / 1000) {
+        let f = ledger::stream_path(&state.join("ledger"), &rid, &s.invocation_id);
+        if std::fs::remove_file(f).is_ok() {
+            expired_files += 1;
+        }
+    }
+
     // what it says
     let would = rows.iter().filter(|r| r.would.is_some()).count();
     let same = rows
@@ -793,6 +803,7 @@ fn run(a: &Args) -> Result<Exit, String> {
             "{}",
             serde_json::json!({"invocation_id": inv, "head": head, "dirty": dirty,
                 "mode": if a.real { "real" } else { "observe" }, "defense_round": defense_round,
+                "ledger_files_expired": expired_files,
                 "cases_run": cases.len(),
                 "exit": code.code(), "units": v, "ledger_problems": problems})
         );

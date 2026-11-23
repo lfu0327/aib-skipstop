@@ -90,6 +90,10 @@ no audit picked the unit this time. Otherwise it runs:
 
 A failure is never a source: a red unit runs again until it is green.
 
+A run's ledger file is kept for 30 days and then removed, except one that holds a revocation,
+which is kept for good (it is what makes "never a source again" outlast the days). The events
+book is not trimmed: its savings are what "this year" and "all" are added up from.
+
 Two more things run a unit whatever its key: a ledger file that cannot be read whole (it may
 hold a newer failure or a revocation: nothing is reused until the file named in the output is
 dealt with), and a unit whose same key has both passed and failed before on this kind of machine.
