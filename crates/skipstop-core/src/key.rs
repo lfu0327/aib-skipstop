@@ -534,4 +534,31 @@ mod tests {
         assert_eq!(k, key(&a, &a, &a));
         assert_eq!(k.len(), 64);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_in_a_named_folder_pointing_outside_hashes_its_target_not_the_external_file() {
+        let ext = tmp("outside");
+        let secret = ext.0.join("secret.txt");
+        fs::write(&secret, "v1\n").unwrap();
+
+        let t = repo("symfolder");
+        fs::create_dir_all(t.0.join("assets")).unwrap();
+        std::os::unix::fs::symlink(&secret, t.0.join("assets/ext")).unwrap();
+
+        let all = wide_paths(&t.0).unwrap();
+        let paths = declared(&all, &["assets/".into()]).unwrap();
+        assert_eq!(paths, vec!["assets/ext"]);
+
+        let mut c = FileCache::default();
+        let k1 = input_list(&t.0, &paths, &mut c).unwrap();
+        fs::write(&secret, "v2\n").unwrap();
+        let k2 = input_list(&t.0, &paths, &mut c).unwrap();
+        assert_eq!(k1, k2, "external file content must not be followed");
+
+        fs::remove_file(t.0.join("assets/ext")).unwrap();
+        std::os::unix::fs::symlink(ext.0.join("other.txt"), t.0.join("assets/ext")).unwrap();
+        let k3 = input_list(&t.0, &paths, &mut c).unwrap();
+        assert_ne!(k1, k3, "changing the symlink target text must move the key");
+    }
 }

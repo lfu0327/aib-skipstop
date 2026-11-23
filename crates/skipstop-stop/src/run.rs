@@ -712,4 +712,28 @@ mod tests {
         c.cmd = sh("test -f marker");
         assert_eq!(run_check(d.path(), &c), Ended::Code(0));
     }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_timeout_kills_process_tree() {
+        let d = tempfile::tempdir().unwrap();
+        let mut c = check("c", Kind::Reject, None);
+        c.timeout_s = 1;
+        c.cmd = vec![
+            "cmd".to_string(),
+            "/C".to_string(),
+            "start /B cmd /C \"ping -n 4 127.0.0.1 >nul & type nul > late\" & ping -n 20 127.0.0.1 >nul".to_string(),
+        ];
+        let t = Instant::now();
+        assert_eq!(run_check(d.path(), &c), Ended::Timeout);
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "killed at its limit, not waited for"
+        );
+        std::thread::sleep(Duration::from_secs(5));
+        assert!(
+            !d.path().join("late").exists(),
+            "a child process left behind by taskkill /T went on running"
+        );
+    }
 }
