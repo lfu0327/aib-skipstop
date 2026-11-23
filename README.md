@@ -199,6 +199,28 @@ cargo run --release -p skipstop-knife -- run       # all of them, about a minute
 }
 ```
 
+### Units that are not cargo packages
+
+Any command can be a unit: say the command and the files its result depends on.
+
+```json
+{
+  "units": {
+    "web": {
+      "run": ["npm", "test"],
+      "run_windows": ["npm.cmd", "test"],
+      "inputs": ["web/", "package.json", "package-lock.json"],
+      "tools": [["node", "--version"]]
+    }
+  }
+}
+```
+
+A repo with no `Cargo.toml` has only these units. For a cargo package the files are found from
+the build's own graph; here **a person names them, and a file the command reads that the list
+does not name is a change that will not be seen** until an audit or the weekly defense round
+runs the command for real. Name folders rather than single files, and when in doubt name more.
+
 A key is the hash of the files a unit reads. A test that reads the network, deploys something
 or depends on the date has an input no file holds: name it in `never_reuse` and it runs every
 time. A file that is not understood stops the run; it never runs as the defaults instead.

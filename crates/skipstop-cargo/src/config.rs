@@ -17,6 +17,29 @@
 //! - `keep_days` (8 to 3650, default 30): how long a run's ledger file is kept. Not under 8:
 //!   the weekly questions need a week of history.
 //!
+//! - `units`: units that are not cargo packages: any command, with the files it reads said
+//!   by a person.
+//!
+//!   ```json
+//!   "units": {
+//!     "web": {
+//!       "run": ["npm", "test"],
+//!       "run_windows": ["npm.cmd", "test"],
+//!       "inputs": ["web/", "package.json", "package-lock.json"],
+//!       "env": ["NODE_ENV"],
+//!       "tools": [["node", "--version"]],
+//!       "timeout_s": 900
+//!     }
+//!   }
+//!   ```
+//!
+//!   `run`: the command, as a list (no shell). `run_windows`: the list used on Windows instead,
+//!   when the program has another name there. `inputs`: files, or folders ending in `/`, of
+//!   the repo; the key is their hash, so **a file the command reads and this list does not
+//!   name is a change that will not be seen**. `env`: variables whose value changes the result.
+//!   `tools`: commands whose whole output is part of the key (a version). `timeout_s`: 1 to
+//!   86400, default 1800. The command passes with exit code 0; any other code is a failure.
+//!
 //! A key the file does not know, a value out of its range, a key twice: errors. A setting a
 //! person wrote and the program did not understand must not run as the default instead.
 
@@ -26,7 +49,21 @@ use std::collections::BTreeMap;
 pub const FILE: &str = "skipstop.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandUnit {
+    /// the command on this system (`run_windows` on Windows when it is given)
+    pub run: Vec<String>,
+    pub inputs: Vec<String>,
+    pub env: Vec<String>,
+    pub tools: Vec<Vec<String>>,
+    pub timeout_s: u64,
+}
+
+pub const UNIT_TIMEOUT_DEFAULT_S: u64 = 1800;
+pub const UNIT_TIMEOUT_MAX_S: u64 = 86_400;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
+    pub units: BTreeMap<String, CommandUnit>,
     pub never_reuse: BTreeMap<String, NeverReuse>,
     pub defense_period_days: i64,
     pub keep_days: i64,
@@ -35,6 +72,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            units: BTreeMap::new(),
             never_reuse: BTreeMap::new(),
             defense_period_days: crate::real::DEFENSE_PERIOD_DAYS,
             keep_days: crate::real::KEEP_DAYS,
@@ -48,7 +86,104 @@ fn days(v: &serde_json::Value, name: &str, min: i64, max: i64) -> Result<i64, St
         .ok_or_else(|| format!("\"{name}\" is not a whole number from {min} to {max}"))
 }
 
+fn argv(v: &serde_json::Value, what: &str) -> Result<Vec<String>, String> {
+    let list: Option<Vec<String>> = v.as_array().and_then(|a| {
+        a.iter()
+            .map(|x| x.as_str().map(str::to_owned))
+            .collect::<Option<Vec<String>>>()
+    });
+    list.filter(|l| l.first().is_some_and(|p| !p.trim().is_empty()))
+        .ok_or_else(|| format!("{what} is not a list of words that starts with a program"))
+}
+
+/// A name a unit, a variable or a file of the ledger can have: letters, digits, `.`, `_`, `-`.
+fn plain_name(s: &str) -> bool {
+    !s.is_empty()
+        && !s.starts_with(['.', '-'])
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// An input: a path of the repo, `/` between its parts, not leaving the repo.
+fn input_ok(p: &str) -> bool {
+    !p.is_empty()
+        && !p.starts_with('/')
+        && !p.contains('\\')
+        && !p.contains(':')
+        && p.trim_end_matches('/')
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+fn unit(name: &str, v: &serde_json::Value, windows: bool) -> Result<CommandUnit, String> {
+    let o = v
+        .as_object()
+        .ok_or_else(|| format!("unit {name:?} is not an object"))?;
+    let mut run = None;
+    let mut run_windows = None;
+    let mut u = CommandUnit {
+        run: Vec::new(),
+        inputs: Vec::new(),
+        env: Vec::new(),
+        tools: Vec::new(),
+        timeout_s: UNIT_TIMEOUT_DEFAULT_S,
+    };
+    let words = |v: &serde_json::Value, key: &str, ok: &dyn Fn(&str) -> bool| {
+        v.as_array()
+            .and_then(|a| {
+                a.iter()
+                    .map(|x| x.as_str().filter(|s| ok(s)).map(str::to_owned))
+                    .collect::<Option<Vec<String>>>()
+            })
+            .ok_or_else(|| format!("unit {name:?}: \"{key}\" has a word that cannot be one"))
+    };
+    for (k, v) in o {
+        match k.as_str() {
+            "run" => run = Some(argv(v, &format!("unit {name:?}: \"run\""))?),
+            "run_windows" => {
+                run_windows = Some(argv(v, &format!("unit {name:?}: \"run_windows\""))?)
+            }
+            "inputs" => u.inputs = words(v, k, &input_ok)?,
+            "env" => u.env = words(v, k, &|s| plain_name(s) && !s.contains(['.', '-']))?,
+            "tools" => {
+                let list = v
+                    .as_array()
+                    .ok_or_else(|| format!("unit {name:?}: \"tools\" is not a list"))?;
+                for t in list {
+                    u.tools.push(argv(t, &format!("unit {name:?}: a tool"))?);
+                }
+            }
+            "timeout_s" => {
+                u.timeout_s = v
+                    .as_u64()
+                    .filter(|t| (1..=UNIT_TIMEOUT_MAX_S).contains(t))
+                    .ok_or_else(|| {
+                        format!("unit {name:?}: \"timeout_s\" is not a whole number from 1 to {UNIT_TIMEOUT_MAX_S}")
+                    })?
+            }
+            other => return Err(format!("unit {name:?}: \"{other}\" is not a setting")),
+        }
+    }
+    let run = run.ok_or_else(|| format!("unit {name:?} has no \"run\""))?;
+    u.run = match run_windows {
+        Some(w) if windows => w,
+        _ => run,
+    };
+    // no inputs: every run would have one key, and the first green would be reused for ever
+    if u.inputs.is_empty() {
+        return Err(format!(
+            "unit {name:?} has no \"inputs\": name the files its result depends on"
+        ));
+    }
+    Ok(u)
+}
+
 pub fn parse(text: &str) -> Result<Config, String> {
+    parse_for(text, cfg!(windows))
+}
+
+/// [`parse`] for a system said by the caller (`windows`: `run_windows` is the command).
+pub fn parse_for(text: &str, windows: bool) -> Result<Config, String> {
     let v = skipstop_ledger::strict::json(text)?;
     let o = v.as_object().ok_or("not an object")?;
     let mut c = Config::default();
@@ -72,6 +207,17 @@ pub fn parse(text: &str) -> Result<Config, String> {
                         return Err("never_reuse has a unit with no name".into());
                     }
                     c.never_reuse.insert(unit.clone(), class);
+                }
+            }
+            "units" => {
+                let m = v.as_object().ok_or("\"units\" is not an object")?;
+                for (name, v) in m {
+                    if !plain_name(name) {
+                        return Err(format!(
+                            "unit {name:?}: a name is letters, digits, '.', '_' and '-'"
+                        ));
+                    }
+                    c.units.insert(name.clone(), unit(name, v, windows)?);
                 }
             }
             "defense_period_days" => c.defense_period_days = days(v, k, 1, 30)?,
@@ -185,6 +331,66 @@ mod tests {
             );
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_command_unit_says_its_command_and_its_inputs_or_it_is_an_error() {
+        let text = r#"{"units": {"web": {
+            "run": ["npm", "test"], "run_windows": ["npm.cmd", "test"],
+            "inputs": ["web/", "package.json"], "env": ["NODE_ENV"],
+            "tools": [["node", "--version"]], "timeout_s": 900}}}"#;
+        let u = &parse_for(text, false).unwrap().units["web"];
+        assert_eq!(u.run, vec!["npm", "test"]);
+        assert_eq!(u.inputs, vec!["web/", "package.json"]);
+        assert_eq!((u.env.len(), u.tools.len(), u.timeout_s), (1, 1, 900));
+        // on Windows the other list is the command
+        assert_eq!(
+            parse_for(text, true).unwrap().units["web"].run,
+            vec!["npm.cmd", "test"]
+        );
+        // without run_windows, run is the command there too; the time limit has a default
+        let plain = r#"{"units": {"web": {"run": ["make", "check"], "inputs": ["src/"]}}}"#;
+        let u = &parse_for(plain, true).unwrap().units["web"];
+        assert_eq!(
+            (u.run.clone(), u.timeout_s),
+            (
+                vec!["make".to_string(), "check".into()],
+                UNIT_TIMEOUT_DEFAULT_S
+            )
+        );
+        let with = |body: &str| format!(r#"{{"units": {{"web": {body}}}}}"#);
+        for bad in [
+            // no inputs: one key for ever
+            r#"{"run": ["make"]}"#,
+            r#"{"run": ["make"], "inputs": []}"#,
+            // no command, a command that is a line for a shell, an empty program
+            r#"{"inputs": ["src/"]}"#,
+            r#"{"run": "make check", "inputs": ["src/"]}"#,
+            r#"{"run": [], "inputs": ["src/"]}"#,
+            r#"{"run": [" "], "inputs": ["src/"]}"#,
+            r#"{"run": ["make", 1], "inputs": ["src/"]}"#,
+            r#"{"run": ["make"], "run_windows": [], "inputs": ["src/"]}"#,
+            // inputs that leave the repo or are no path of it
+            r#"{"run": ["make"], "inputs": ["../other/"]}"#,
+            r#"{"run": ["make"], "inputs": ["/etc/hosts"]}"#,
+            r#"{"run": ["make"], "inputs": ["src//x"]}"#,
+            r#"{"run": ["make"], "inputs": ["C:\\x"]}"#,
+            r#"{"run": ["make"], "inputs": [""]}"#,
+            r#"{"run": ["make"], "inputs": ["src/"], "env": ["A B"]}"#,
+            r#"{"run": ["make"], "inputs": ["src/"], "tools": [[]]}"#,
+            r#"{"run": ["make"], "inputs": ["src/"], "timeout_s": 0}"#,
+            r#"{"run": ["make"], "inputs": ["src/"], "timeout_s": 86401}"#,
+            r#"{"run": ["make"], "inputs": ["src/"], "inptus": ["x"]}"#,
+            r#"["make"]"#,
+        ] {
+            assert!(parse_for(&with(bad), false).is_err(), "{bad}");
+        }
+        // a name that could not be a file of the ledger
+        for name in ["", "a b", "../x", "-p", ".hidden", "a/b"] {
+            let text =
+                format!(r#"{{"units": {{{name:?}: {{"run": ["make"], "inputs": ["src/"]}}}}}}"#);
+            assert!(parse_for(&text, false).is_err(), "{name}");
+        }
     }
 
     #[test]

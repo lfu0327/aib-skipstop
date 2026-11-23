@@ -77,11 +77,11 @@ fn workspace() -> Tmp {
     Tmp(d)
 }
 
-/// A seed under which neither unit is drawn for a random audit at the early rate.
+/// A seed under which no unit of this test is drawn for a random audit at the early rate.
 fn quiet_seed() -> String {
     (0u64..)
         .find(|s| {
-            ["a", "b"]
+            ["a", "b", "c", "note"]
                 .iter()
                 .all(|u| skipstop_audit::draw(*s, u) >= skipstop_audit::EARLY_RATE)
         })
@@ -552,6 +552,67 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
     let r = run(&t, &["--mode", "real", "-p", "c"]);
     assert_eq!((r.rc, r.plan("c")), (0, "reuse".into()), "{}", r.json);
 
+    // a unit that is a command, beside the packages: it is not handed to nextest, it runs as
+    // its own round the first time and is reused after, and the packages go on as before
+    commit(
+        r#"{"never_reuse": {"a": "side_effect"},
+            "units": {"note": {"run": ["git", "grep", "-q", "pub fn", "--", "crates/a/src/lib.rs"],
+                               "inputs": ["crates/a/src/"]}}}"#,
+        "a unit that is a command",
+    );
+    let r = run(&t, &["--mode", "real"]);
+    assert_eq!(
+        (
+            r.rc,
+            r.plan("note"),
+            r.result("note"),
+            r.plan("a"),
+            r.plan("c")
+        ),
+        (
+            0,
+            "run:defense_round".into(),
+            "pass".into(),
+            "run:never_reuse:side_effect".into(),
+            "reuse".into()
+        ),
+        "{}",
+        r.json
+    );
+    let r = run(&t, &["--mode", "real"]);
+    assert_eq!(
+        (r.rc, r.plan("note"), r.plan("c")),
+        (0, "reuse".into(), "reuse".into()),
+        "{}",
+        r.json
+    );
+    // asked for alone, and beside one package
+    let r = run(&t, &["--mode", "real", "-p", "note"]);
+    assert_eq!(
+        (
+            r.rc,
+            r.json["units"].as_array().unwrap().len(),
+            r.plan("note")
+        ),
+        (0, 1, "reuse".into())
+    );
+    let r = run(&t, &["--mode", "real", "--fresh", "-p", "note", "-p", "c"]);
+    assert_eq!(
+        (r.rc, r.result("note"), r.result("c")),
+        (0, "pass".into(), "pass".into()),
+        "{}",
+        r.json
+    );
+    assert_eq!(
+        (
+            r.unit("note")["tests"].as_u64(),
+            r.unit("c")["tests"].as_u64()
+        ),
+        (Some(1), Some(1)),
+        "{}",
+        r.json
+    );
+
     // a settings file that is not understood stops the run: it does not run as the defaults
     // (in which `a` would have been reused). A name that is no package is such a file too
     for (bad, says) in [
@@ -559,6 +620,11 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
         (
             r#"{"never_reuse": {"aa": "side_effect"}}"#,
             "no package of this workspace",
+        ),
+        // a unit with the name of a package: which of the two would `-p a` be
+        (
+            r#"{"units": {"a": {"run": ["git", "status"], "inputs": ["crates/"]}}}"#,
+            "has the name of a package",
         ),
     ] {
         commit(bad, "a typo");
