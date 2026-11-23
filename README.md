@@ -207,6 +207,11 @@ time. A file that is not understood stops the run; it never runs as the defaults
 `docs/FORMATS.md`: exit codes, the run's JSON and every `plan` word, `saved --json`, the events
 book, the ledger, and the lines `stop` prints.
 
+## Taking part
+
+`CONTRIBUTING.md` (what a change needs), `SECURITY.md` (what counts as a security problem here,
+and what the files do not defend against), `CODE_OF_CONDUCT.md`.
+
 ## Releases
 
 `CHANGELOG.md`. A tag `v<version>` builds the three executables and a `SHA256SUMS` into a draft
