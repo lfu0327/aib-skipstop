@@ -86,7 +86,8 @@ no audit picked the unit this time. Otherwise it runs:
 - **audits**: one unit in five at random for the first two weeks, one in ten after; and always
   after ten reuses in a row or seven days without a real run;
 - a real run that disagrees with the source it would have been reused from **revokes** that
-  source for good, and the run is not green.
+  source for good, and the run is not green. Disagrees: another outcome, another number of
+  tests, other failed tests, or the same number of other tests (which cases ran is compared).
 
 A failure is never a source: a red unit runs again until it is green.
 

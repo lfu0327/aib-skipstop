@@ -48,7 +48,7 @@ Each unit:
 | `key` | the unit's key; null when it could not be worked out (`unmeasurable` then says why) |
 | `would_reuse` | `{from, key, tree, at}`: the source run, when there is one |
 | `same` | the real run now equals the source's result (null: nothing to compare) |
-| `audit` | `{compare, revoke}` when the real run was compared with a source: `same`, `behavior_changed`, `mismatch`, `incomparable`; `revoke` true = that source is never a source again |
+| `audit` | `{compare, revoke}` when the real run was compared with a source: `same`, `mismatch`, `incomparable` (`behavior_changed` is a word of the format that this version does not write); `revoke` true = that source is never a source again. Compared: the outcome, the number of tests, the names of the failed ones, and which cases ran and how each ended |
 
 With `--plan` the object is `{plan_only: true, mode, units: [{unit, plan, key, unmeasurable}],
 would_run, decided_in_ms, ledger_problems}`; nothing ran and nothing was written.
@@ -128,7 +128,8 @@ it is a gate or evidence for one.
 
 ## The ledger: `<state>/ledger/<repo>/<invocation_id>.jsonl`
 
-One file per run: a `plan` line, a line per unit, an `end` line. A run without its `end` line
+One file per run: a `plan` line, a line per unit, an `end` line. A unit that ran has `output_digest`:
+`cases-v1:` and the sha256 of which cases it ran and how each ended (order and times left out). A run without its `end` line
 was killed or is still going, and is not a source. A file that cannot be read whole is a
 problem: it is named in `ledger_problems` and nothing is reused until it is dealt with (remove
 the file, or let the run that is writing it finish). Files older than 30 days are removed,

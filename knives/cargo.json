@@ -896,6 +896,89 @@
     "--locked",
     "--lib"
    ]
+  },
+  {
+   "id": "cargo-CD1",
+   "why": "the same count of other tests is not a mismatch: the source stays",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if l.compare == Compare::BehaviorChanged {",
+   "new": "    if l.compare == Compare::BehaviorChanged && !met {",
+   "test": "the_same_count_of_other_cases_revokes_and_a_source_with_no_cases_line_does_not",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-CD2",
+   "why": "a run does not take the line of its cases: nothing to compare the next run with",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        r.cases = skipstop_cargo::cases_digest(&c);",
+   "new": "        r.cases = skipstop_cargo::cases_digest(&[]);",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-CD3",
+   "why": "the cases line depends on the order the runner gave them in",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "    lines.sort_unstable();",
+   "new": "    lines.reverse();",
+   "test": "the_cases_line_is_of_which_cases_and_how_they_ended_not_of_order_or_time",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CD4",
+   "why": "a case that was skipped gives the line of one that passed",
+   "file": "crates/skipstop-cargo/src/lib.rs",
+   "old": "                CaseStatus::Skipped => \"skipped\",",
+   "new": "                CaseStatus::Skipped => \"passed\",",
+   "test": "the_cases_line_is_of_which_cases_and_how_they_ended_not_of_order_or_time",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CD5",
+   "why": "a source from before the cases line was taken is revoked for not having one",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if source.is_empty() {\n        String::new()\n    } else {\n        now.to_string()\n    }",
+   "new": "    if source.is_empty() && now.is_empty() {\n        String::new()\n    } else {\n        now.to_string()\n    }",
+   "test": "the_same_count_of_other_cases_revokes_and_a_source_with_no_cases_line_does_not",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
   }
  ]
 }
