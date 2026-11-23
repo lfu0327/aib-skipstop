@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 skipstop-core = { path = "../skipstop-core" }
+sha2 = "0.10.9"
 skipstop-audit = { path = "../skipstop-audit" }
 skipstop-ledger = { path = "../skipstop-ledger" }
 skipstop-stop = { path = "../skipstop-stop" }

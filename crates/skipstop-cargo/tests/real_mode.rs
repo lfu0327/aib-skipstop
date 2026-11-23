@@ -128,7 +128,17 @@ fn run_env(t: &Tmp, args: &[&str], hidden: Option<&str>) -> Out {
 
 /// `run_env` with the ledger in another state folder of the same workspace (a fresh history).
 fn run_state(t: &Tmp, state: &str, args: &[&str], hidden: Option<&str>) -> Out {
+    run_full(t, state, args, hidden, false)
+}
+
+/// `run_state`, with c's build script told (or not) to build its other test.
+fn run_full(t: &Tmp, state: &str, args: &[&str], hidden: Option<&str>, alt: bool) -> Out {
     let mut c = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"));
+    if alt {
+        c.env("SKIPSTOP_TEST_ALT", "1");
+    } else {
+        c.env_remove("SKIPSTOP_TEST_ALT");
+    }
     match hidden {
         Some(v) => c.env("SKIPSTOP_TEST_HIDDEN", v),
         None => c.env_remove("SKIPSTOP_TEST_HIDDEN"),
@@ -282,8 +292,12 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
     fs::create_dir_all(ws.join("crates/c/src")).unwrap();
     let c_toml = "[package]\nname = \"c\"\nversion = \"0.0.0\"\nedition = \"2021\"\n";
     fs::write(ws.join("crates/c/Cargo.toml"), c_toml).unwrap();
-    let lib_c = LIB_A.replace("a()", "c()").replace("a_is_one", "c_is_one");
+    // c has one test, and which one is decided by its build script from the environment: an
+    // input that is in no file, and that changes neither the count nor the result
+    let lib_c = "pub fn c() -> u32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[cfg(not(alt))]\n    #[test]\n    fn c_is_one() {\n        assert_eq!(super::c(), 1);\n    }\n\n    #[cfg(alt)]\n    #[test]\n    fn c_is_one_the_other_way() {\n        assert_eq!(super::c(), 1);\n    }\n}\n";
     fs::write(ws.join("crates/c/src/lib.rs"), lib_c).unwrap();
+    let build_c = "fn main() {\n    println!(\"cargo:rerun-if-env-changed=SKIPSTOP_TEST_ALT\");\n    println!(\"cargo:rustc-check-cfg=cfg(alt)\");\n    if std::env::var_os(\"SKIPSTOP_TEST_ALT\").is_some() {\n        println!(\"cargo:rustc-cfg=alt\");\n    }\n}\n";
+    fs::write(ws.join("crates/c/build.rs"), build_c).unwrap();
     let members =
         "[workspace]\nresolver = \"2\"\nmembers = [\"crates/a\", \"crates/b\", \"crates/c\"]\n";
     fs::write(ws.join("Cargo.toml"), members).unwrap();
@@ -560,6 +574,57 @@ fn real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure() {
         assert!(err.contains("skipstop.json") && err.contains(says), "{err}");
     }
     fs::remove_file(&cfg).unwrap();
+    git(&t.0.join("ws"), &["add", "-A"]);
+    git(&t.0.join("ws"), &["commit", "-q", "-m", "no settings"]);
+
+    // the same number of tests, all passing, and not the same tests: c's build script built
+    // its other test. Outcome, count and failed names all agree with the source; which cases
+    // ran does not, so the source is revoked and the run is not green
+    let r = run(&t, &["--mode", "real"]);
+    assert_eq!((r.rc, r.plan("c")), (0, "reuse".into()), "{}", r.json);
+    let r = run_full(&t, "state", &["--mode", "real", "--fresh"], None, true);
+    let c = r.unit("c");
+    assert_eq!(
+        (c["result"].as_str(), c["tests"].as_u64()),
+        (Some("pass"), Some(1)),
+        "{}",
+        r.json
+    );
+    assert_eq!(
+        (
+            c["audit"]["compare"].as_str(),
+            c["audit"]["revoke"].as_bool()
+        ),
+        (Some("mismatch"), Some(true)),
+        "{}",
+        r.json
+    );
+    assert_eq!(r.rc, 8, "{}", r.json);
+    assert_eq!(r.unit("a")["audit"]["compare"], "same", "{}", r.json);
+    // every unit that ran wrote its cases line, and a unit run alone (-p) writes the same line
+    // as in a run of all: it is of the unit's own cases
+    let line_of = |r: &Out, unit: &str| -> String {
+        let f = repo_ledger(&t).join(format!(
+            "{}.jsonl",
+            r.json["invocation_id"].as_str().unwrap()
+        ));
+        fs::read_to_string(f)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .find(|v| v.to_string().contains(&format!("\"unit\":\"{unit}\"")))
+            .and_then(|v| {
+                let s = v.to_string();
+                let i = s.find("cases-v1:")?;
+                Some(s[i..i + "cases-v1:".len() + 64].to_string())
+            })
+            .unwrap_or_else(|| panic!("no cases line for {unit}"))
+    };
+    let all = run(&t, &["--mode", "real", "--fresh"]);
+    let alone = run(&t, &["--mode", "real", "--fresh", "-p", "a"]);
+    assert_eq!(line_of(&all, "a"), line_of(&alone, "a"));
+    assert_ne!(line_of(&all, "a"), line_of(&all, "c"));
+    assert_eq!(run(&t, &["--mode", "real"]).plan("c"), "run:no_source");
 
     // a word that is not a mode is refused, not read as one
     let o = Command::new(env!("CARGO_BIN_EXE_aib-skipstop"))

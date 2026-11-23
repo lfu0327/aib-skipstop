@@ -250,6 +250,8 @@ struct Row {
     /// the source line as a verdict, to check this real run against (1ced7 engine link)
     source: Option<Verdict>,
     failed: Vec<String>,
+    /// which cases ran and how each ended, as one line ([`skipstop_cargo::cases_digest`])
+    cases: String,
     /// the unit's own time in the source run, when its line has one
     source_ms: Option<u64>,
     audit: Option<Audit>,
@@ -482,7 +484,12 @@ fn run(a: &Args) -> Result<Exit, String> {
             outcome: audit_outcome(u.result),
             tests_ran: u.tests_ran,
             failed: u.failed.clone(),
-            output_digest: u.output_digest.clone().unwrap_or_default(),
+            // only a line of the kind this version takes is compared with
+            output_digest: u
+                .output_digest
+                .clone()
+                .filter(|d| d.starts_with(skipstop_cargo::CASES_DIGEST))
+                .unwrap_or_default(),
             censored: !st.complete(),
         });
         rows.push(Row {
@@ -494,6 +501,7 @@ fn run(a: &Args) -> Result<Exit, String> {
             source,
             source_ms,
             failed: Vec::new(),
+            cases: String::new(),
             audit: None,
             result: Outcome::None,
             ran: 0,
@@ -625,14 +633,17 @@ fn run(a: &Args) -> Result<Exit, String> {
             .map(|x| format!("{} {}", x.binary, x.name))
             .collect();
         r.failed.sort();
+        r.cases = skipstop_cargo::cases_digest(&c);
         if let Some(src) = &r.source {
-            // this real run is an audit of the source it would have reused; no output digest
-            // is taken yet, so the two sides compare on outcome, count and failed names only
+            // this real run is an audit of the source it would have reused: the two sides
+            // compare on outcome, count, failed names, and on which cases ran and how each
+            // ended. A source written before that line was taken has none: then neither side
+            // brings one, and the older three decide
             let audit = Verdict {
                 outcome: audit_outcome(r.result),
                 tests_ran: Some(r.ran),
                 failed: r.failed.clone(),
-                output_digest: String::new(),
+                output_digest: cases_to_compare(&src.output_digest, &r.cases),
                 censored: false,
             };
             r.audit = Some(audit_of(&audit, src, met));
@@ -695,7 +706,11 @@ fn run(a: &Args) -> Result<Exit, String> {
             key: r.key.clone(),
             tests_ran: if reused { None } else { Some(r.ran) },
             failed: r.failed.clone(),
-            output_digest: None,
+            output_digest: if reused || r.cases.is_empty() {
+                None
+            } else {
+                Some(r.cases.clone())
+            },
             audit: r.audit.clone(),
             shadow: if reused {
                 None
@@ -980,6 +995,18 @@ fn audit_outcome(o: Outcome) -> AuditOutcome {
 /// The audit line for one unit. A source line written before the ledger had `tests_ran`
 /// (None) cannot be compared: Incomparable and never revoked, or the first run after an
 /// upgrade would revoke every old source as a false mismatch (5d33a 598ce962 L1).
+/// The cases line this run brings to its audit: its own when the source has one, none when
+/// the source has none (a ledger written before the line was taken). An old source is then
+/// compared on outcome, count and failed names as it always was, not revoked for lacking a
+/// line nobody took.
+fn cases_to_compare(source: &str, now: &str) -> String {
+    if source.is_empty() {
+        String::new()
+    } else {
+        now.to_string()
+    }
+}
+
 fn audit_of(audit: &Verdict, source: &Verdict, met: bool) -> Audit {
     if source.tests_ran.is_none() {
         return Audit {
@@ -988,6 +1015,15 @@ fn audit_of(audit: &Verdict, source: &Verdict, met: bool) -> Audit {
         };
     }
     let l = engine::link(audit, source, met);
+    // the only line taken is of which cases ran and how each ended. Under one key that is
+    // the same every time; a difference means something the key does not hold decided which
+    // tests there are, so the source is not one to reuse from: a mismatch, and revoked
+    if l.compare == Compare::BehaviorChanged {
+        return Audit {
+            compare: AuditCompare::Mismatch,
+            revoke: true,
+        };
+    }
     Audit {
         compare: match l.compare {
             Compare::Same => AuditCompare::Same,
@@ -1171,5 +1207,29 @@ mod tests {
         assert_eq!((a.compare, a.revoke), (AuditCompare::Same, false));
         let b = audit_of(&v(Some(57), &[]), &v(Some(56), &[]), true);
         assert_eq!((b.compare, b.revoke), (AuditCompare::Mismatch, true));
+    }
+
+    #[test]
+    fn the_same_count_of_other_cases_revokes_and_a_source_with_no_cases_line_does_not() {
+        let with = |d: &str| Verdict {
+            output_digest: d.into(),
+            ..v(Some(56), &[])
+        };
+        let same = audit_of(&with("cases-v1:aa"), &with("cases-v1:aa"), true);
+        assert_eq!((same.compare, same.revoke), (AuditCompare::Same, false));
+        let other = audit_of(&with("cases-v1:bb"), &with("cases-v1:aa"), true);
+        assert_eq!(
+            (other.compare, other.revoke),
+            (AuditCompare::Mismatch, true)
+        );
+        // an old source has no line: this run brings none either, and the two are the same
+        assert_eq!(cases_to_compare("", "cases-v1:bb"), "");
+        assert_eq!(
+            cases_to_compare("cases-v1:aa", "cases-v1:bb"),
+            "cases-v1:bb"
+        );
+        let now = with(&cases_to_compare("", "cases-v1:bb"));
+        let old = audit_of(&now, &with(""), true);
+        assert_eq!((old.compare, old.revoke), (AuditCompare::Same, false));
     }
 }

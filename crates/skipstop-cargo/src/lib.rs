@@ -219,6 +219,44 @@ pub struct Case {
     pub ms: Option<u64>,
 }
 
+/// What marks a [`cases_digest`] in the ledger's `output_digest` field.
+pub const CASES_DIGEST: &str = "cases-v1:";
+
+/// One line for the set of cases a unit ran and how each ended: sha256 over the sorted
+/// `binary`, `name`, status of every case, times left out. Two real runs of one key give the
+/// same line; when they do not (the same number of tests, other tests; one that passed where
+/// it was skipped), something the key does not hold decided which tests there are.
+pub fn cases_digest(cases: &[Case]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut lines: Vec<String> = cases
+        .iter()
+        .map(|c| {
+            let status = match c.status {
+                CaseStatus::Passed => "passed",
+                CaseStatus::Failed => "failed",
+                CaseStatus::Flaky => "flaky",
+                CaseStatus::Skipped => "skipped",
+            };
+            // lengths first: no two different cases give one line
+            format!(
+                "{}:{}:{}:{}:{status}",
+                c.binary.len(),
+                c.name.len(),
+                c.binary,
+                c.name
+            )
+        })
+        .collect();
+    lines.sort_unstable();
+    let mut h = Sha256::new();
+    for l in &lines {
+        h.update((l.len() as u64).to_be_bytes());
+        h.update(l.as_bytes());
+    }
+    let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    format!("{CASES_DIGEST}{hex}")
+}
+
 fn unescape(s: &str) -> String {
     s.replace("&lt;", "<")
         .replace("&gt;", ">")
@@ -356,6 +394,54 @@ pub fn read(listed: &[Listed], cases: &[Case]) -> Reading {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cases_line_is_of_which_cases_and_how_they_ended_not_of_order_or_time() {
+        let case = |b: &str, n: &str, status, ms| Case {
+            binary: b.into(),
+            name: n.into(),
+            status,
+            ms,
+        };
+        let one = [
+            case("a", "t1", CaseStatus::Passed, Some(5)),
+            case("a", "t2", CaseStatus::Passed, None),
+        ];
+        let d = cases_digest(&one);
+        assert!(
+            d.starts_with(CASES_DIGEST) && d.len() == CASES_DIGEST.len() + 64,
+            "{d}"
+        );
+        // another order, other times: the same line
+        let other = [
+            case("a", "t2", CaseStatus::Passed, Some(900)),
+            case("a", "t1", CaseStatus::Passed, Some(1)),
+        ];
+        assert_eq!(cases_digest(&other), d);
+        // the same number of cases, another case; another ending; another binary
+        for changed in [
+            [
+                case("a", "t1", CaseStatus::Passed, None),
+                case("a", "t3", CaseStatus::Passed, None),
+            ],
+            [
+                case("a", "t1", CaseStatus::Passed, None),
+                case("a", "t2", CaseStatus::Skipped, None),
+            ],
+            [
+                case("a", "t1", CaseStatus::Passed, None),
+                case("b", "t2", CaseStatus::Passed, None),
+            ],
+        ] {
+            assert_ne!(cases_digest(&changed), d);
+        }
+        // a name is not split where its neighbour ends
+        assert_ne!(
+            cases_digest(&[case("ab", "c", CaseStatus::Passed, None)]),
+            cases_digest(&[case("a", "bc", CaseStatus::Passed, None)])
+        );
+        assert_ne!(cases_digest(&[]), d);
+    }
 
     // shapes copied from cargo-nextest 0.9.152 output on a test machine (paths shortened,
     // other fields kept): list --message-format json, and the JUnit file of profile aib
