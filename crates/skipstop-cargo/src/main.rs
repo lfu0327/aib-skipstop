@@ -415,6 +415,18 @@ fn run(a: &Args) -> Result<Exit, String> {
     } else {
         a.packages.clone()
     };
+    // the project's own settings; a file that is there and not understood stops the run: it
+    // must not run as the defaults instead (a unit said never to be reused would be reused)
+    let config = skipstop_cargo::config::load(&root)?;
+    let all: Vec<String> = ws.packages.iter().map(|p| p.name.clone()).collect();
+    let strangers = skipstop_cargo::config::strangers(&config, &all);
+    if !strangers.is_empty() {
+        return Err(format!(
+            "{}: never_reuse names {} which is no package of this workspace",
+            skipstop_cargo::config::FILE,
+            strangers.join(", ")
+        ));
+    }
     if chosen.is_empty() {
         return Ok(Exit::ZeroUnits);
     }
@@ -498,6 +510,7 @@ fn run(a: &Args) -> Result<Exit, String> {
             ledger_ok: problems.is_empty(),
             seed: fresh_seed(),
             now_s: now_ms() / 1000,
+            config: &config,
         };
         for r in &mut rows {
             r.plan = real::decide(&asked, &r.unit, r.would.is_some());
@@ -770,7 +783,7 @@ fn run(a: &Args) -> Result<Exit, String> {
     // old ledger files go (never one that holds a revocation, never one that could not be
     // read: that one is a problem to be looked at, and it is not in `streams`)
     let mut expired_files = 0;
-    for s in real::expired(&streams, real::KEEP_DAYS, now_ms() / 1000) {
+    for s in real::expired(&streams, config.keep_days, now_ms() / 1000) {
         let f = ledger::stream_path(&state.join("ledger"), &rid, &s.invocation_id);
         if std::fs::remove_file(f).is_ok() {
             expired_files += 1;
@@ -1026,6 +1039,23 @@ mod tests {
             );
         }
         assert!(doc.contains("| `reuse` |"));
+        assert!(doc.contains("| `run:never_reuse:<class>` |"));
+        for class in [
+            "writes_worktree",
+            "reads_outside",
+            "side_effect",
+            "time_random_home",
+        ] {
+            let n = skipstop_audit::NeverReuse::from_word(class).expect("a class");
+            assert_eq!(
+                skipstop_cargo::config::why_word(n),
+                format!("never_reuse:{class}")
+            );
+            assert!(
+                doc.contains(&format!("`{class}`")),
+                "{class} is not in the document"
+            );
+        }
         for code in [
             Exit::Ok,
             Exit::Failed,

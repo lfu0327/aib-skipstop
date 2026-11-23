@@ -59,6 +59,7 @@ would_run, decided_in_ms, ledger_problems}`; nothing ran and nothing was written
 |---|---|
 | `run:observe` | ran: observe mode runs everything |
 | `run:fresh` | ran: `--fresh` |
+| `run:never_reuse:<class>` | ran: the project's `skipstop.json` says it is never reused; the class is `writes_worktree`, `reads_outside`, `side_effect` or `time_random_home` |
 | `run:ledger_unread` | ran: a ledger file could not be read, so nothing is reused |
 | `run:defense_round` | ran: its weekly defense round was due (or it is new to real mode) |
 | `run:no_source` | ran: no key, or no earlier green run of this key on a clean tree, or that source was revoked |
@@ -92,6 +93,17 @@ A box:
 
 Show `clock_ms` as "time saved". The unit-time numbers add up work that ran side by side and are
 larger than the clock.
+
+## The project's settings: `skipstop.json` at the repo's root
+
+No file: the defaults. A key that is not below, a value out of range, a key written twice, or a
+`never_reuse` name that is no package of the workspace stops the run with exit 7.
+
+| key | |
+|---|---|
+| `never_reuse` | `{"<package>": "<class>"}`: packages that run every time whatever their key. Class: `writes_worktree`, `reads_outside` (the network, state outside the repo), `side_effect` (deploys, sends, pushes), `time_random_home` |
+| `defense_period_days` | 1 to 30, default 7: how often every unit runs whatever its key |
+| `keep_days` | 8 to 3650, default 30: how long a run's ledger file is kept |
 
 ## The events book: `<state>/events/<YYYY-MM>.jsonl`
 

@@ -214,8 +214,8 @@
    "id": "cargo-RL2",
    "why": "the defense round reuses like any run, so an input no key holds is never found",
    "file": "crates/skipstop-cargo/src/real.rs",
-   "old": "    if matches!(defense(a.streams, unit, a.now_s), Defense::Due { .. }) {",
-   "new": "    if matches!(defense(a.streams, unit, a.now_s), Defense::Due { .. }) && false {",
+   "old": "        defense(a.streams, unit, period, a.now_s),\n        Defense::Due { .. }\n    ) {",
+   "new": "        defense(a.streams, unit, period, a.now_s),\n        Defense::Due { .. }\n    ) && unit.is_empty()\n    {",
    "test": "fresh_the_defense_round_and_no_source_each_run_the_unit_whatever_else_holds",
    "cmd": [
     "cargo",
@@ -409,8 +409,8 @@
    "id": "cargo-RM3",
    "why": "a package new to real mode gets no round of its own when the others are reused",
    "file": "crates/skipstop-cargo/src/real.rs",
-   "old": "        last_defense_at(streams, unit),\n        DEFENSE_PERIOD_DAYS,",
-   "new": "        last_defense_at(streams, unit).or(Some(now_s)),\n        DEFENSE_PERIOD_DAYS,",
+   "old": "    defense_due(last_defense_at(streams, unit), period_days, false, now_s)",
+   "new": "    defense_due(last_defense_at(streams, unit).or(Some(now_s)), period_days, false, now_s)",
    "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
    "cmd": [
     "cargo",
@@ -775,6 +775,119 @@
    "old": "        .filter(|s| s.at_ms < cutoff_ms)",
    "new": "        .filter(|s| s.at_ms < cutoff_ms || s.at_ms > 0)",
    "test": "old_runs_may_go_and_one_that_holds_a_revocation_never_does",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CF1",
+   "why": "a unit the project says is never reused is reused",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    if let Some(class) = a.config.never_reuse.get(unit) {",
+   "new": "    if let Some(class) = a.config.never_reuse.get(unit).filter(|_| false) {",
+   "test": "a_unit_the_project_says_is_never_reused_runs_and_the_round_follows_its_setting",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CF2",
+   "why": "the defense round ignores the project's period",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    let period = a.config.defense_period_days;",
+   "new": "    let period = a.config.defense_period_days.max(DEFENSE_PERIOD_DAYS);",
+   "test": "a_unit_the_project_says_is_never_reused_runs_and_the_round_follows_its_setting",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CF3",
+   "why": "a setting the program does not know is passed over: a typo runs as the default",
+   "file": "crates/skipstop-cargo/src/config.rs",
+   "old": "            other => return Err(format!(\"\\\"{other}\\\" is not a setting\")),",
+   "new": "            _ => {}",
+   "test": "no_setting_is_the_default_and_a_setting_not_understood_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CF4",
+   "why": "a defense round of never (0 days) or once a year is taken",
+   "file": "crates/skipstop-cargo/src/config.rs",
+   "old": "            \"defense_period_days\" => c.defense_period_days = days(v, k, 1, 30)?,",
+   "new": "            \"defense_period_days\" => c.defense_period_days = days(v, k, 0, 400)?,",
+   "test": "no_setting_is_the_default_and_a_setting_not_understood_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CF5",
+   "why": "flaky can be declared in the settings file",
+   "file": "crates/skipstop-cargo/src/config.rs",
+   "old": "                        .filter(|n| *n != NeverReuse::Flaky)",
+   "new": "                        .filter(|n| *n != NeverReuse::Flaky || true)",
+   "test": "no_setting_is_the_default_and_a_setting_not_understood_is_an_error",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-CF6",
+   "why": "a never_reuse name that is no package is passed over: the unit it meant is reused",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    if !strangers.is_empty() {",
+   "new": "    if !strangers.is_empty() && false {",
+   "test": "real_mode_skips_what_did_not_change_and_never_reuses_or_hides_a_failure",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-CF7",
+   "why": "a settings file that is a link to nothing is read as no settings",
+   "file": "crates/skipstop-cargo/src/config.rs",
+   "old": "    match std::fs::symlink_metadata(&path) {",
+   "new": "    match std::fs::metadata(&path) {",
+   "test": "only_a_missing_file_is_the_defaults",
    "cmd": [
     "cargo",
     "test",

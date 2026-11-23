@@ -79,7 +79,7 @@ fn id_ok(s: &str) -> bool {
 /// check; an id comes once; a key that is not known is an error (a typo in `kind` or
 /// `stop_codes` must not silently turn a check into another one).
 pub fn parse(text: &str) -> Result<Vec<Check>, String> {
-    let v: Value = serde_json::from_str(text).map_err(|e| format!("not JSON: {e}"))?;
+    let v: Value = skipstop_ledger::strict::json(text)?;
     let list = v
         .get("checks")
         .and_then(Value::as_array)
