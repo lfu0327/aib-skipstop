@@ -245,6 +245,7 @@ impl Trial {
 /// is not known what it would have said.
 pub fn trial(streams: &[Stream], now_s: i64) -> Trial {
     let mut t = Trial::default();
+    let mut last_fail_sig: Option<Vec<(String, Option<String>)>> = None;
     for s in streams.iter().filter(|s| s.complete()) {
         let has = |cell: &str| s.plan.cells.iter().any(|c| c == cell);
         let real = has(CELL_REAL) || has(CELL_DEFENSE);
@@ -258,12 +259,18 @@ pub fn trial(streams: &[Stream], now_s: i64) -> Trial {
         } else {
             t.runs_observe += 1;
         }
+        let mut fail_sig: Vec<(String, Option<String>)> = Vec::new();
         for (_, u) in &s.units {
             if u.how == How::Reused {
                 t.reused += 1;
             }
-            if u.how == How::Ran && u.result == skipstop_core::ledger::Outcome::Fail {
-                t.reds += 1;
+            let predicted_to_run =
+                u.audit.is_none() && u.shadow.as_ref().is_none_or(|sh| sh.would_reuse.is_none());
+            if predicted_to_run
+                && u.how == How::Ran
+                && u.result == skipstop_core::ledger::Outcome::Fail
+            {
+                fail_sig.push((u.unit.clone(), u.key.clone()));
             }
             if let Some(a) = &u.audit {
                 match a.compare {
@@ -282,6 +289,13 @@ pub fn trial(streams: &[Stream], now_s: i64) -> Trial {
                     None => {}
                 }
             }
+        }
+        fail_sig.sort();
+        if fail_sig.is_empty() {
+            last_fail_sig = None;
+        } else if last_fail_sig.as_ref() != Some(&fail_sig) {
+            t.reds += 1;
+            last_fail_sig = Some(fail_sig);
         }
     }
     if let Some(first) = t.first_at_ms {
@@ -921,6 +935,33 @@ mod tests {
         let t = trial(&bad, NOW_S);
         assert_eq!((t.same, t.differed, t.revoked), (0, 1, 1));
         assert_eq!(trial(&[], NOW_S), Trial::default());
+
+        // multiple units failing in one run, or consecutive repeats of the same failing (unit, key)
+        // set, count as 1 red; a failure on a unit predicted to reuse (shadow.would_reuse) is a
+        // differed comparison, not a predicted-to-run red
+        let multi_red = plain(
+            DAY_MS,
+            vec![red.clone(), {
+                let mut r2 = red.clone();
+                r2.unit = "c".into();
+                r2
+            }],
+        );
+        let mut obs_reuse_fail = red.clone();
+        obs_reuse_fail.shadow = Some(skipstop_core::ledger::Shadow {
+            would_reuse: Some(skipstop_core::ledger::Reuse {
+                from: "src".into(),
+                key: "k".into(),
+                tree: "t".into(),
+                at: "0".into(),
+                origin: skipstop_core::ledger::Origin::Local,
+            }),
+            same: Some(false),
+        });
+        let obs_fail_stream = stream(DAY_MS * 2, CELL_OBSERVE, Some(true), vec![obs_reuse_fail]);
+        let t_dedup = trial(&[multi_red.clone(), multi_red, obs_fail_stream], NOW_S);
+        assert_eq!(t_dedup.reds, 1);
+        assert_eq!(t_dedup.differed, 1);
     }
 
     #[test]

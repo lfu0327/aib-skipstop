@@ -40,7 +40,11 @@ const LIB_A: &str = "pub fn a() -> u32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\
 const LIB_B: &str = "pub fn b() -> u32 {\n    2\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn b_is_two() {\n        assert_eq!(super::b(), 2);\n        assert!(std::env::var(\"SKIPSTOP_TEST_HIDDEN\").is_err());\n    }\n}\n";
 
 fn workspace() -> Tmp {
-    let d = std::env::temp_dir().join(format!("skipstop-real-{}", std::process::id()));
+    workspace_named("real")
+}
+
+fn workspace_named(tag: &str) -> Tmp {
+    let d = std::env::temp_dir().join(format!("skipstop-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&d);
     for p in ["ws/crates/a/src", "ws/crates/b/src", "state"] {
         fs::create_dir_all(d.join(p)).unwrap();
@@ -821,4 +825,50 @@ fn a_clones_working_trees_share_one_ledger_and_another_clone_reads_none_of_it() 
     git(&other, &["worktree", "add", "-q", "-b", "old", &named]);
     assert_eq!(trial_in(&t.0.join(&clone_id), &state)["runs_real"], 0);
     assert_eq!(trial_in(&other, &state)["runs_real"], 0);
+}
+
+#[test]
+fn extra_inputs_invalidates_only_the_named_package_when_that_file_changes() {
+    let have = Command::new("cargo")
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !have {
+        assert!(
+            std::env::var("SKIPSTOP_ALLOW_NO_NEXTEST").as_deref() == Ok("1"),
+            "cargo-nextest is not installed"
+        );
+        return;
+    }
+
+    let t = workspace_named("extra-inputs");
+    let ws = t.0.join("ws");
+    fs::create_dir_all(ws.join("docs")).unwrap();
+    fs::write(ws.join("docs/spec.txt"), "v1\n").unwrap();
+    fs::write(
+        ws.join("skipstop.json"),
+        "{\"extra_inputs\":{\"a\":[\"docs/spec.txt\"]}}\n",
+    )
+    .unwrap();
+    git(&ws, &["add", "docs/spec.txt", "skipstop.json"]);
+    git(&ws, &["commit", "-q", "-m", "extra_inputs"]);
+
+    // First run: both a and b run (first run is the defense round)
+    let r1 = run(&t, &["--mode", "real"]);
+    assert_eq!(r1.rc, 0, "{}", r1.json);
+    assert!(r1.plan("a").starts_with("run"), "{}", r1.json);
+    assert!(r1.plan("b").starts_with("run"), "{}", r1.json);
+
+    // Second run: both reused
+    let r2 = run(&t, &["--mode", "real"]);
+    assert_eq!(r2.rc, 0, "{}", r2.json);
+    assert_eq!(r2.plan("a"), "reuse");
+    assert_eq!(r2.plan("b"), "reuse");
+
+    // Modify docs/spec.txt: only a's key changes; b stays reused
+    fs::write(ws.join("docs/spec.txt"), "v2\n").unwrap();
+    let r3 = run(&t, &["--mode", "real"]);
+    assert_eq!(r3.rc, 0, "{}", r3.json);
+    assert_eq!(r3.plan("a"), "run:no_source", "{}", r3.json);
+    assert_eq!(r3.plan("b"), "reuse", "{}", r3.json);
 }

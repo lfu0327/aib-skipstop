@@ -1,0 +1,5 @@
+{
+  "extra_inputs": {
+    "skipstop-cargo": ["docs/FORMATS.md", "aib-plugin.json", "CHANGELOG.md"]
+  }
+}
