@@ -218,18 +218,19 @@ fn tier_report(a: &Args) -> Result<String, String> {
                 "fell_back_to_strict": fell_back,
                 "policy": {
                     "reuse": policy.reuse.word(),
-                    "spot_every": policy.spot_every,
+                    "spot": policy.spot,
                     "knives": policy.knives.word(),
+                    "retry_miss": policy.retry_miss.word(),
                     "platforms": policy.platforms.word(),
-                    "stop": policy.stop.word(),
-                    "cell_max_min": policy.cell_max_min,
-                    "script_max_knives": policy.script_max_knives,
-                    "script_max_min": policy.script_max_min,
                     "overflow": policy.overflow.word(),
+                    "cell_max_min": policy.cell_max_min,
+                    "cells_max": policy.cells_max,
                 },
                 "repo_settings": {
                     "linux_knives": repo_settings.linux_knives,
                     "knife_length_check": repo_settings.knife_length_check.word(),
+                    "script_max_knives": repo_settings.script_max_knives,
+                    "script_max_min": repo_settings.script_max_min,
                     "merge_batch_tz": repo_settings.merge_batch_tz,
                     "merge_batch_hours": repo_settings.merge_batch_hours,
                 }
@@ -237,18 +238,19 @@ fn tier_report(a: &Args) -> Result<String, String> {
         ));
     }
     Ok(format!(
-        "tier={tier_word} fell_back_to_strict={fell_back} reuse={} spot=1/{} knives={} platforms={} stop={} cell_max_min={} script_max_knives={} script_max_min={} overflow={}\nrepo: linux_knives={} knife_length_check={} merge_batch={}:{:?}\n",
+        "tier={tier_word} fell_back_to_strict={fell_back} reuse={} spot=1/{} knives={} retry_miss={} platforms={} overflow={} cell_max_min={} cells_max={}\nrepo: linux_knives={} knife_length_check={} script_max_knives={} script_max_min={} merge_batch={}:{:?}\n",
         policy.reuse.word(),
-        policy.spot_every,
+        policy.spot,
         policy.knives.word(),
+        policy.retry_miss.word(),
         policy.platforms.word(),
-        policy.stop.word(),
-        policy.cell_max_min,
-        policy.script_max_knives,
-        policy.script_max_min,
         policy.overflow.word(),
+        policy.cell_max_min,
+        policy.cells_max,
         repo_settings.linux_knives,
         repo_settings.knife_length_check.word(),
+        repo_settings.script_max_knives,
+        repo_settings.script_max_min,
         repo_settings.merge_batch_tz,
         repo_settings.merge_batch_hours,
     ))
@@ -652,7 +654,7 @@ fn run(a: &Args) -> Result<Exit, String> {
     // the project's own settings; a file that is there and not understood stops the run: it
     // must not run as the defaults instead (a unit said never to be reused would be reused)
     let config = skipstop_cargo::config::load(&root)?;
-    let (tier_policy, tier_fell_back) = config.effective_policy(false);
+    let (_tier_policy, tier_fell_back) = config.effective_policy(false);
     if tier_fell_back {
         eprintln!("aib-skipstop: unsigned relaxation in Phase 1 fell back to strict (main_exact)");
     }
@@ -661,10 +663,8 @@ fn run(a: &Args) -> Result<Exit, String> {
     } else {
         config.tier.unwrap_or(skipstop_cargo::tiers::Tier::Normal)
     };
-    let effective_real =
-        a.real && !matches!(tier_policy.reuse, skipstop_cargo::tiers::ReuseMode::Observe);
-    let effective_fresh =
-        a.fresh || matches!(tier_policy.reuse, skipstop_cargo::tiers::ReuseMode::Off);
+    let effective_real = a.real;
+    let effective_fresh = a.fresh;
     let a = &Args {
         packages: a.packages.clone(),
         state: a.state.clone(),

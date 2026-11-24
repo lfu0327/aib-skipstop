@@ -415,7 +415,8 @@ mod tests {
         assert_eq!(eff_normal.cell_max_min, 60);
         let (eff_strict, fb2) = t.policy_for_paths(&["crates/aibd/src/auth/key.rs".into()], false);
         assert!(!fb2);
-        assert_eq!(eff_strict, TierPolicy::for_tier(Tier::Strict));
+        assert_eq!(eff_strict.reuse, crate::tiers::ReuseMode::MainExact);
+        assert_eq!(eff_strict.cell_max_min, 60);
 
         let fast = parse(r#"{"tier": "fast"}"#).unwrap();
         let (eff_fb, fb3) = fast.effective_policy(false);
