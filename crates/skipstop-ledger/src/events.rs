@@ -289,7 +289,7 @@ pub fn append(root: &Path, prog: &str, ev: &Value, at_ms: i64) -> Result<PathBuf
 /// [`append`] into an events folder named outright (a program told where its state lives,
 /// `--state <dir>`, keeps its events there too and not under the default root).
 pub fn append_in(d: &Path, ev: &Value, at_ms: i64) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(d).map_err(|e| format!("mkdir: {e}"))?;
+    crate::ensure_dir(d)?;
     let _lock = crate::take_lock(&d.join("events.lock"), LOCK_WAIT)?;
     let f = d.join(month_file(at_ms));
     let line = serde_json::to_string(ev).map_err(|e| format!("json: {e}"))?;

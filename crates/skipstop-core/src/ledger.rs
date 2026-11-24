@@ -299,7 +299,7 @@ impl Writer {
         }
         let path = stream_path(root, repo_id, invocation_id);
         if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).map_err(|e| format!("mkdir: {e}"))?;
+            skipstop_ledger::ensure_dir(dir)?;
         }
         OpenOptions::new()
             .write(true)
