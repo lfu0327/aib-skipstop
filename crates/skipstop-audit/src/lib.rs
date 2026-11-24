@@ -273,16 +273,19 @@ pub enum NeverReuse {
     SideEffect,
     /// reads the time, randomness or the home folder
     TimeRandomHome,
+    /// security gate: auth, permissions, signatures, or boundaries that must always run
+    Security,
     /// the same key in the same environment both passed and failed
     Flaky,
 }
 
 impl NeverReuse {
-    pub const ALL: [NeverReuse; 5] = [
+    pub const ALL: [NeverReuse; 6] = [
         Self::WritesWorktree,
         Self::ReadsOutside,
         Self::SideEffect,
         Self::TimeRandomHome,
+        Self::Security,
         Self::Flaky,
     ];
 
@@ -292,6 +295,7 @@ impl NeverReuse {
             Self::ReadsOutside => "reads_outside",
             Self::SideEffect => "side_effect",
             Self::TimeRandomHome => "time_random_home",
+            Self::Security => "security",
             Self::Flaky => "flaky",
         }
     }

@@ -587,8 +587,17 @@ fn run(a: &Args) -> Result<Exit, String> {
     let strangers = skipstop_cargo::config::strangers(&config, &all);
     if !strangers.is_empty() {
         return Err(format!(
-            "{file}: never_reuse names {} which is no package of this workspace and no unit of this file",
+            "{file}: never_reuse or extra_inputs names {} which is no package of this workspace and no unit of this file",
             strangers.join(", ")
+        ));
+    }
+    if let Some(cmd_unit) = config
+        .extra_inputs
+        .keys()
+        .find(|u| config.units.contains_key(*u))
+    {
+        return Err(format!(
+            "{file}: extra_inputs names command unit {cmd_unit:?}; add paths to units.{cmd_unit}.inputs instead"
         ));
     }
     let chosen: Vec<String> = if a.packages.is_empty() {
@@ -650,7 +659,12 @@ fn run(a: &Args) -> Result<Exit, String> {
                 return Ok(key::key(&format!("command {def}"), &ch, &inputs));
             }
             let ch = chash.as_ref().map_err(|e| format!("{e:?}"))?;
-            let pre = ws.inputs(name, &present)?;
+            let mut pre = ws.inputs(name, &present)?;
+            if let Some(extra) = config.extra_inputs.get(name) {
+                pre.extend(extra.iter().cloned());
+                pre.sort();
+                pre.dedup();
+            }
             let paths = key::declared(all, &pre).map_err(|e| format!("{e:?}"))?;
             let inputs =
                 key::input_list(&root, &paths, &mut cache).map_err(|e| format!("{e:?}"))?;
@@ -1361,6 +1375,7 @@ mod tests {
             "reads_outside",
             "side_effect",
             "time_random_home",
+            "security",
         ] {
             let n = skipstop_audit::NeverReuse::from_word(class).expect("a class");
             assert_eq!(

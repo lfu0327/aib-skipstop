@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 — 2026-11-24
+
+- **`trial` counts predicted-to-run real failures (`reds`).** Failures on audited or would-reuse units no longer count against the trial gate; consecutive identical `(unit, key)` failure runs count as one red.
+- **`skipstop.json` `extra_inputs` for cargo packages.** Packages that read files outside their crate folder (`include_str!`, `include_bytes!`) can declare those repo-relative paths in `extra_inputs.<package>` so edits invalidate their key.
+- **`never_reuse` adds `"security"` class.** Security-sensitive or credential-touching units can opt out of reuse explicitly (`never_reuse:security`).
+
 ## 0.4.1 — 2026-11-24
 
 - **`saved --json` includes `recent`.** Up to 20 newest real-mode time-saving events (`at`, `system`, `confirmed`, `saved_ms`, `avoided`, `basis`), net of revoked or wrong-stop entries, for AIB's chat bar and filter.

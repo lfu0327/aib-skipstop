@@ -65,6 +65,7 @@ pub const UNIT_TIMEOUT_MAX_S: u64 = 86_400;
 pub struct Config {
     pub units: BTreeMap<String, CommandUnit>,
     pub never_reuse: BTreeMap<String, NeverReuse>,
+    pub extra_inputs: BTreeMap<String, Vec<String>>,
     pub defense_period_days: i64,
     pub keep_days: i64,
 }
@@ -74,6 +75,7 @@ impl Default for Config {
         Config {
             units: BTreeMap::new(),
             never_reuse: BTreeMap::new(),
+            extra_inputs: BTreeMap::new(),
             defense_period_days: crate::real::DEFENSE_PERIOD_DAYS,
             keep_days: crate::real::KEEP_DAYS,
         }
@@ -200,13 +202,35 @@ pub fn parse_for(text: &str, windows: bool) -> Result<Config, String> {
                         .ok_or_else(|| {
                             format!(
                                 "never_reuse {unit:?}: {why} is not writes_worktree, reads_outside, \
-                                 side_effect or time_random_home"
+                                 side_effect, time_random_home or security"
                             )
                         })?;
                     if unit.trim().is_empty() {
                         return Err("never_reuse has a unit with no name".into());
                     }
                     c.never_reuse.insert(unit.clone(), class);
+                }
+            }
+            "extra_inputs" => {
+                let m = v.as_object().ok_or("\"extra_inputs\" is not an object")?;
+                for (name, v) in m {
+                    if name.trim().is_empty() {
+                        return Err("extra_inputs has a unit with no name".into());
+                    }
+                    let list = v
+                        .as_array()
+                        .and_then(|a| {
+                            a.iter()
+                                .map(|x| x.as_str().filter(|s| input_ok(s)).map(str::to_owned))
+                                .collect::<Option<Vec<String>>>()
+                        })
+                        .ok_or_else(|| {
+                            format!("extra_inputs {name:?} has a path that cannot be one")
+                        })?;
+                    if list.is_empty() {
+                        return Err(format!("extra_inputs {name:?} is empty"));
+                    }
+                    c.extra_inputs.insert(name.clone(), list);
                 }
             }
             "units" => {
@@ -243,11 +267,12 @@ pub fn load(root: &std::path::Path) -> Result<Config, String> {
     parse(&text).map_err(|e| format!("{FILE}: {e}"))
 }
 
-/// The units `never_reuse` names that are not units of this workspace: a typo there would
-/// leave the unit it meant to be reused like any other.
+/// The units `never_reuse` or `extra_inputs` names that are not units of this workspace: a typo
+/// there would leave the unit it meant to be reused like any other or miss its extra inputs.
 pub fn strangers<'a>(c: &'a Config, units: &[String]) -> Vec<&'a str> {
     c.never_reuse
         .keys()
+        .chain(c.extra_inputs.keys())
         .filter(|u| !units.contains(u))
         .map(String::as_str)
         .collect()
@@ -260,6 +285,7 @@ pub fn why_word(n: NeverReuse) -> &'static str {
         NeverReuse::ReadsOutside => "never_reuse:reads_outside",
         NeverReuse::SideEffect => "never_reuse:side_effect",
         NeverReuse::TimeRandomHome => "never_reuse:time_random_home",
+        NeverReuse::Security => "never_reuse:security",
         NeverReuse::Flaky => "flaky",
     }
 }
@@ -272,11 +298,31 @@ mod tests {
     fn no_setting_is_the_default_and_a_setting_not_understood_is_an_error() {
         assert_eq!(parse("{}").unwrap(), Config::default());
         let c = parse(
-            r#"{"never_reuse": {"deploy": "side_effect", "fmt": "writes_worktree"},
+            r#"{"never_reuse": {"deploy": "side_effect", "fmt": "writes_worktree", "gate": "security"},
+                "extra_inputs": {"skipstop-cargo": ["docs/FORMATS.md"]},
                 "defense_period_days": 3, "keep_days": 90}"#,
         )
         .unwrap();
         assert_eq!(c.never_reuse["deploy"], NeverReuse::SideEffect);
+        assert_eq!(c.never_reuse["gate"], NeverReuse::Security);
+        assert_eq!(why_word(NeverReuse::Security), "never_reuse:security");
+        assert_eq!(c.extra_inputs["skipstop-cargo"], vec!["docs/FORMATS.md"]);
+        assert_eq!(
+            strangers(
+                &c,
+                &[
+                    "deploy".into(),
+                    "fmt".into(),
+                    "gate".into(),
+                    "skipstop-cargo".into()
+                ]
+            ),
+            Vec::<&str>::new()
+        );
+        assert_eq!(
+            strangers(&c, &["deploy".into(), "fmt".into(), "gate".into()]),
+            vec!["skipstop-cargo"]
+        );
         assert_eq!((c.defense_period_days, c.keep_days), (3, 90));
         for bad in [
             r#"{"never_resue": {}}"#,
@@ -286,6 +332,12 @@ mod tests {
             r#"{"never_reuse": {"deploy": true}}"#,
             r#"{"never_reuse": ["deploy"]}"#,
             r#"{"never_reuse": {" ": "side_effect"}}"#,
+            r#"{"extra_inputs": {"a": []}}"#,
+            r#"{"extra_inputs": {" ": ["a"]}}"#,
+            r#"{"extra_inputs": {"a": ["../secret"]}}"#,
+            r#"{"extra_inputs": {"a": ["/etc/passwd"]}}"#,
+            r#"{"extra_inputs": {"a": ["docs\\spec.txt"]}}"#,
+            r#"{"extra_inputs": {"a": [""]}}"#,
             // no round at all, or one a year
             r#"{"defense_period_days": 0}"#,
             r#"{"defense_period_days": 31}"#,
