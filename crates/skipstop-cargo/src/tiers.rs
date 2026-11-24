@@ -32,11 +32,9 @@ impl Tier {
     }
 }
 
-/// Ordered from strictest (`Off`) to loosest (`Scope`).
+/// Ordered from strictest (`MainExact`) to loosest (`Scope`) per DESIGN r4 §2 & §12.13.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReuseMode {
-    Off,
-    Observe,
     MainExact,
     Exact,
     Scope,
@@ -45,8 +43,6 @@ pub enum ReuseMode {
 impl ReuseMode {
     pub fn from_word(s: &str) -> Option<Self> {
         match s {
-            "off" => Some(Self::Off),
-            "observe" => Some(Self::Observe),
             "main_exact" => Some(Self::MainExact),
             "exact" => Some(Self::Exact),
             "scope" => Some(Self::Scope),
@@ -56,8 +52,6 @@ impl ReuseMode {
 
     pub fn word(self) -> &'static str {
         match self {
-            Self::Off => "off",
-            Self::Observe => "observe",
             Self::MainExact => "main_exact",
             Self::Exact => "exact",
             Self::Scope => "scope",
@@ -65,20 +59,69 @@ impl ReuseMode {
     }
 }
 
-/// Ordered from strictest (`All`) to loosest (`Changed`).
+/// Ordered from strictest (`ChangedAll`) to loosest (`TouchedOnly`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KnifeScope {
-    All,
+    ChangedAll,
     Affected,
-    Changed,
+    TouchedOnly,
 }
 
 impl KnifeScope {
     pub fn from_word(s: &str) -> Option<Self> {
         match s {
-            "all" => Some(Self::All),
+            "changed_all" => Some(Self::ChangedAll),
             "affected" => Some(Self::Affected),
-            "changed" => Some(Self::Changed),
+            "touched_only" => Some(Self::TouchedOnly),
+            _ => None,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::ChangedAll => "changed_all",
+            Self::Affected => "affected",
+            Self::TouchedOnly => "touched_only",
+        }
+    }
+}
+
+/// Ordered from strictest (`On`) to loosest (`Off`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RetryMiss {
+    On,
+    Off,
+}
+
+impl RetryMiss {
+    pub fn from_word(s: &str) -> Option<Self> {
+        match s {
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+        }
+    }
+}
+
+/// Ordered from strictest (`All`) to loosest (`Primary`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PlatformScope {
+    All,
+    Primary,
+}
+
+impl PlatformScope {
+    pub fn from_word(s: &str) -> Option<Self> {
+        match s {
+            "all" => Some(Self::All),
+            "primary" => Some(Self::Primary),
             _ => None,
         }
     }
@@ -86,40 +129,12 @@ impl KnifeScope {
     pub fn word(self) -> &'static str {
         match self {
             Self::All => "all",
-            Self::Affected => "affected",
-            Self::Changed => "changed",
+            Self::Primary => "primary",
         }
     }
 }
 
-/// Ordered from strictest (`Both`) to loosest (`LinuxOnly`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PlatformScope {
-    Both,
-    Native,
-    LinuxOnly,
-}
-
-impl PlatformScope {
-    pub fn from_word(s: &str) -> Option<Self> {
-        match s {
-            "both" => Some(Self::Both),
-            "native" => Some(Self::Native),
-            "linux_only" => Some(Self::LinuxOnly),
-            _ => None,
-        }
-    }
-
-    pub fn word(self) -> &'static str {
-        match self {
-            Self::Both => "both",
-            Self::Native => "native",
-            Self::LinuxOnly => "linux_only",
-        }
-    }
-}
-
-/// Ordered from strictest (`Reject`) to loosest (`Warn`).
+/// Ordered from strictest (`Reject`) to loosest (`Warn`) for repo knife_length_check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StopMode {
     Reject,
@@ -143,18 +158,18 @@ impl StopMode {
     }
 }
 
-/// Ordered from strictest (`AddCell`) to loosest (`Trim`).
+/// Ordered from strictest (`AddCell`) to loosest (`Defer`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OverflowMode {
     AddCell,
-    Trim,
+    Defer,
 }
 
 impl OverflowMode {
     pub fn from_word(s: &str) -> Option<Self> {
         match s {
             "add_cell" => Some(Self::AddCell),
-            "trim" => Some(Self::Trim),
+            "defer" => Some(Self::Defer),
             _ => None,
         }
     }
@@ -162,29 +177,29 @@ impl OverflowMode {
     pub fn word(self) -> &'static str {
         match self {
             Self::AddCell => "add_cell",
-            Self::Trim => "trim",
+            Self::Defer => "defer",
         }
     }
 }
 
 pub const CELL_MAX_MIN_RANGE: (u32, u32) = (10, 140);
+pub const CELLS_MAX_RANGE: (u32, u32) = (1, 8);
 pub const SCRIPT_MAX_KNIVES_RANGE: (u32, u32) = (20, 300);
-pub const SCRIPT_MAX_MIN_RANGE: (u32, u32) = (5, 60);
-pub const SPOT_EVERY_RANGE: (u32, u32) = (0, 100);
+pub const SCRIPT_MAX_MIN_RANGE: (u32, u32) = (5, 30);
+pub const SPOT_RANGE: (u32, u32) = (2, 100);
 
-/// Complete 8-field expanded policy (plus `overflow` for cell budget handling).
+/// Complete 8-field expanded policy per DESIGN r4 §2 & §12.13.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TierPolicy {
     pub reuse: ReuseMode,
-    /// Spot-check denominator (e.g. `5` = 1/5, `10` = 1/10; `0` = never spot-check).
-    pub spot_every: u32,
+    /// Spot-check denominator (e.g. `5` = 1/5, `10` = 1/10, range 2..=100).
+    pub spot: u32,
     pub knives: KnifeScope,
+    pub retry_miss: RetryMiss,
     pub platforms: PlatformScope,
-    pub stop: StopMode,
-    pub cell_max_min: u32,
-    pub script_max_knives: u32,
-    pub script_max_min: u32,
     pub overflow: OverflowMode,
+    pub cell_max_min: u32,
+    pub cells_max: u32,
 }
 
 impl TierPolicy {
@@ -192,36 +207,33 @@ impl TierPolicy {
         match tier {
             Tier::Strict => Self {
                 reuse: ReuseMode::MainExact,
-                spot_every: 5,
-                knives: KnifeScope::All,
-                platforms: PlatformScope::Both,
-                stop: StopMode::Reject,
-                cell_max_min: 60,
-                script_max_knives: 100,
-                script_max_min: 20,
+                spot: 5,
+                knives: KnifeScope::ChangedAll,
+                retry_miss: RetryMiss::On,
+                platforms: PlatformScope::All,
                 overflow: OverflowMode::AddCell,
+                cell_max_min: 90,
+                cells_max: 5,
             },
             Tier::Normal => Self {
-                reuse: ReuseMode::MainExact,
-                spot_every: 10,
+                reuse: ReuseMode::Scope,
+                spot: 10,
                 knives: KnifeScope::Affected,
-                platforms: PlatformScope::Native,
-                stop: StopMode::Reject,
-                cell_max_min: 90,
-                script_max_knives: 140,
-                script_max_min: 25,
+                retry_miss: RetryMiss::Off,
+                platforms: PlatformScope::Primary,
                 overflow: OverflowMode::AddCell,
+                cell_max_min: 90,
+                cells_max: 5,
             },
             Tier::Fast => Self {
                 reuse: ReuseMode::Scope,
-                spot_every: 20,
-                knives: KnifeScope::Changed,
-                platforms: PlatformScope::LinuxOnly,
-                stop: StopMode::Warn,
+                spot: 20,
+                knives: KnifeScope::Affected,
+                retry_miss: RetryMiss::Off,
+                platforms: PlatformScope::Primary,
+                overflow: OverflowMode::Defer,
                 cell_max_min: 60,
-                script_max_knives: 200,
-                script_max_min: 30,
-                overflow: OverflowMode::Trim,
+                cells_max: 4,
             },
         }
     }
@@ -230,24 +242,19 @@ impl TierPolicy {
     pub fn stricter(&self, other: &Self) -> Self {
         Self {
             reuse: self.reuse.min(other.reuse),
-            spot_every: match (self.spot_every, other.spot_every) {
-                (0, 0) => 0,
-                (0, n) | (n, 0) => n,
-                (a, b) => a.min(b),
-            },
+            spot: self.spot.min(other.spot),
             knives: self.knives.min(other.knives),
+            retry_miss: self.retry_miss.min(other.retry_miss),
             platforms: self.platforms.min(other.platforms),
-            stop: self.stop.min(other.stop),
-            // Shorter cell cap only loosens when `Trim` is active; under `AddCell`, smaller cells are stricter.
+            overflow: self.overflow.min(other.overflow),
+            // Shorter cell cap only loosens when `Defer` is active; under `AddCell`, smaller cells are stricter.
             cell_max_min: match (self.overflow, other.overflow) {
                 (OverflowMode::AddCell, OverflowMode::AddCell) => {
                     self.cell_max_min.min(other.cell_max_min)
                 }
                 _ => self.cell_max_min.max(other.cell_max_min),
             },
-            script_max_knives: self.script_max_knives.min(other.script_max_knives),
-            script_max_min: self.script_max_min.min(other.script_max_min),
-            overflow: self.overflow.min(other.overflow),
+            cells_max: self.cells_max.min(other.cells_max),
         }
     }
 }
@@ -256,14 +263,13 @@ impl TierPolicy {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TierOverrides {
     pub reuse: Option<ReuseMode>,
-    pub spot_every: Option<u32>,
+    pub spot: Option<u32>,
     pub knives: Option<KnifeScope>,
+    pub retry_miss: Option<RetryMiss>,
     pub platforms: Option<PlatformScope>,
-    pub stop: Option<StopMode>,
-    pub cell_max_min: Option<u32>,
-    pub script_max_knives: Option<u32>,
-    pub script_max_min: Option<u32>,
     pub overflow: Option<OverflowMode>,
+    pub cell_max_min: Option<u32>,
+    pub cells_max: Option<u32>,
 }
 
 impl TierOverrides {
@@ -272,29 +278,26 @@ impl TierOverrides {
         if let Some(v) = self.reuse {
             p.reuse = v;
         }
-        if let Some(v) = self.spot_every {
-            p.spot_every = v;
+        if let Some(v) = self.spot {
+            p.spot = v;
         }
         if let Some(v) = self.knives {
             p.knives = v;
         }
+        if let Some(v) = self.retry_miss {
+            p.retry_miss = v;
+        }
         if let Some(v) = self.platforms {
             p.platforms = v;
         }
-        if let Some(v) = self.stop {
-            p.stop = v;
+        if let Some(v) = self.overflow {
+            p.overflow = v;
         }
         if let Some(v) = self.cell_max_min {
             p.cell_max_min = v;
         }
-        if let Some(v) = self.script_max_knives {
-            p.script_max_knives = v;
-        }
-        if let Some(v) = self.script_max_min {
-            p.script_max_min = v;
-        }
-        if let Some(v) = self.overflow {
-            p.overflow = v;
+        if let Some(v) = self.cells_max {
+            p.cells_max = v;
         }
         p
     }
@@ -334,31 +337,19 @@ fn seg_match(pat: &str, seg: &str) -> bool {
     }
 }
 
-/// Returns `true` if `next` relaxes ANY field compared to `current` (DESIGN r3 §12.5).
+/// Returns `true` if `next` relaxes ANY field compared to `current` (DESIGN r4 §3.2, §12.5).
 pub fn is_relaxation(current: &TierPolicy, next: &TierPolicy) -> bool {
-    if next.reuse > current.reuse {
-        return true;
-    }
-    // Spot-check becomes sparser when reuse is active and denominator grows or drops to 0.
-    let reuses = !matches!(next.reuse, ReuseMode::Off | ReuseMode::Observe);
-    if reuses {
-        match (current.spot_every, next.spot_every) {
-            (0, 0) => {}
-            (_, 0) => return true,
-            (c, n) if c > 0 && n > c => return true,
-            _ => {}
-        }
-    }
-    if next.knives > current.knives
+    if next.reuse > current.reuse
+        || next.spot > current.spot
+        || next.knives > current.knives
+        || next.retry_miss > current.retry_miss
         || next.platforms > current.platforms
-        || next.stop > current.stop
         || next.overflow > current.overflow
-        || next.script_max_knives > current.script_max_knives
-        || next.script_max_min > current.script_max_min
+        || next.cells_max > current.cells_max
     {
         return true;
     }
-    if next.overflow == OverflowMode::Trim && next.cell_max_min < current.cell_max_min {
+    if next.overflow == OverflowMode::Defer && next.cell_max_min < current.cell_max_min {
         return true;
     }
     false
@@ -418,12 +409,15 @@ pub fn classify_verdict(
     }
 }
 
-/// Three repo-wide settings (DESIGN r3 §4 & §12.9):
-/// platform-independent knives on Linux, knife script length check, and merge batch schedule.
+/// Three repo-wide settings (DESIGN r4 §4 & §12.9 & §12.12):
+/// platform-independent knives on Linux, knife script length check (single repo cap 140/15m),
+/// and merge batch schedule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSettings {
     pub linux_knives: bool,
     pub knife_length_check: StopMode,
+    pub script_max_knives: u32,
+    pub script_max_min: u32,
     pub merge_batch_tz: String,
     pub merge_batch_hours: Vec<u32>,
 }
@@ -433,6 +427,8 @@ impl Default for RepoSettings {
         Self {
             linux_knives: false,
             knife_length_check: StopMode::Reject,
+            script_max_knives: 140,
+            script_max_min: 15,
             merge_batch_tz: "Asia/Taipei".to_string(),
             merge_batch_hours: vec![10, 16, 22],
         }
@@ -440,18 +436,34 @@ impl Default for RepoSettings {
 }
 
 pub fn enforce_repo_phase1(r: &RepoSettings, has_hardware_sig: bool) -> (RepoSettings, bool) {
-    if has_hardware_sig || (!r.linux_knives && r.knife_length_check == StopMode::Reject) {
+    if has_hardware_sig
+        || (!r.linux_knives
+            && r.knife_length_check == StopMode::Reject
+            && r.script_max_knives <= 140
+            && r.script_max_min <= 15)
+    {
         return (r.clone(), false);
     }
     let mut safe = r.clone();
     safe.linux_knives = false;
     safe.knife_length_check = StopMode::Reject;
+    safe.script_max_knives = 140;
+    safe.script_max_min = 15;
     (safe, true)
 }
 
 pub fn parse_repo_settings(v: &serde_json::Value) -> Result<RepoSettings, String> {
     let o = v.as_object().ok_or("\"repo_settings\" is not an object")?;
     let mut out = RepoSettings::default();
+    let u32_range =
+        |val: &serde_json::Value, key: &str, (lo, hi): (u32, u32)| -> Result<u32, String> {
+            val.as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .filter(|&n| (lo..=hi).contains(&n))
+                .ok_or_else(|| {
+                    format!("repo_settings: \"{key}\" must be a whole number from {lo} to {hi}")
+                })
+        };
     for (k, val) in o {
         match k.as_str() {
             "linux_knives" => {
@@ -465,6 +477,12 @@ pub fn parse_repo_settings(v: &serde_json::Value) -> Result<RepoSettings, String
                     .ok_or("repo_settings: \"knife_length_check\" is not a string")?;
                 out.knife_length_check = StopMode::from_word(s)
                     .ok_or_else(|| format!("repo_settings: \"{s}\" is not reject or warn"))?;
+            }
+            "script_max_knives" => {
+                out.script_max_knives = u32_range(val, k, SCRIPT_MAX_KNIVES_RANGE)?;
+            }
+            "script_max_min" => {
+                out.script_max_min = u32_range(val, k, SCRIPT_MAX_MIN_RANGE)?;
             }
             "merge_batch_tz" => {
                 let s = val
@@ -523,7 +541,7 @@ pub fn parse_overrides(v: &serde_json::Value, context: &str) -> Result<TierOverr
                         .ok_or_else(|| format!("{context}: \"{s}\" is not a reuse mode"))?,
                 );
             }
-            "spot_every" => out.spot_every = Some(u32_range(val, k, SPOT_EVERY_RANGE)?),
+            "spot" => out.spot = Some(u32_range(val, k, SPOT_RANGE)?),
             "knives" => {
                 let s = val
                     .as_str()
@@ -531,6 +549,15 @@ pub fn parse_overrides(v: &serde_json::Value, context: &str) -> Result<TierOverr
                 out.knives = Some(
                     KnifeScope::from_word(s)
                         .ok_or_else(|| format!("{context}: \"{s}\" is not a knife scope"))?,
+                );
+            }
+            "retry_miss" => {
+                let s = val
+                    .as_str()
+                    .ok_or_else(|| format!("{context}: \"retry_miss\" is not a string"))?;
+                out.retry_miss = Some(
+                    RetryMiss::from_word(s)
+                        .ok_or_else(|| format!("{context}: \"{s}\" is not on or off"))?,
                 );
             }
             "platforms" => {
@@ -542,20 +569,8 @@ pub fn parse_overrides(v: &serde_json::Value, context: &str) -> Result<TierOverr
                         .ok_or_else(|| format!("{context}: \"{s}\" is not a platform scope"))?,
                 );
             }
-            "stop" => {
-                let s = val
-                    .as_str()
-                    .ok_or_else(|| format!("{context}: \"stop\" is not a string"))?;
-                out.stop = Some(
-                    StopMode::from_word(s)
-                        .ok_or_else(|| format!("{context}: \"{s}\" is not a stop mode"))?,
-                );
-            }
             "cell_max_min" => out.cell_max_min = Some(u32_range(val, k, CELL_MAX_MIN_RANGE)?),
-            "script_max_knives" => {
-                out.script_max_knives = Some(u32_range(val, k, SCRIPT_MAX_KNIVES_RANGE)?);
-            }
-            "script_max_min" => out.script_max_min = Some(u32_range(val, k, SCRIPT_MAX_MIN_RANGE)?),
+            "cells_max" => out.cells_max = Some(u32_range(val, k, CELLS_MAX_RANGE)?),
             "overflow" => {
                 let s = val
                     .as_str()
@@ -590,11 +605,11 @@ mod tests {
         // Un-signed fast or looser override falls back to strict
         assert_eq!(enforce_phase1(&fast, false), (strict.clone(), true));
         let mut loose = normal.clone();
-        loose.script_max_knives = 141;
+        loose.spot = 11;
         assert_eq!(enforce_phase1(&loose, false), (strict.clone(), true));
-        let mut loose_stop = normal.clone();
-        loose_stop.stop = StopMode::Warn;
-        assert_eq!(enforce_phase1(&loose_stop, false), (strict, true));
+        let mut loose_knives = normal.clone();
+        loose_knives.knives = KnifeScope::TouchedOnly;
+        assert_eq!(enforce_phase1(&loose_knives, false), (strict, true));
         // Signed fast is allowed
         assert_eq!(enforce_phase1(&fast, true), (fast, false));
     }
@@ -611,10 +626,10 @@ mod tests {
         for bad in [
             r#"{"cell_max_min": 9}"#,
             r#"{"cell_max_min": 141}"#,
-            r#"{"script_max_knives": 19}"#,
-            r#"{"script_max_knives": 301}"#,
-            r#"{"script_max_min": 4}"#,
-            r#"{"script_max_min": 61}"#,
+            r#"{"cells_max": 0}"#,
+            r#"{"cells_max": 9}"#,
+            r#"{"spot": 1}"#,
+            r#"{"spot": 101}"#,
             r#"{"unknown": 1}"#,
         ] {
             let v: serde_json::Value = serde_json::from_str(bad).unwrap();
