@@ -222,9 +222,9 @@ pub struct Trial {
     pub reds: u64,
 }
 
-/// The owner's bar for trusting reuse (ez2-aib DEV-shadow r8 §1, Andy): a week of history,
+/// The owner's bar for trusting reuse (Andy 11-24): 24 hours (1 day) of history,
 /// fifty comparisons, three real failures seen, and not one comparison that differed.
-pub const TRIAL_DAYS: i64 = 7;
+pub const TRIAL_DAYS: i64 = 1;
 pub const TRIAL_COMPARED: u64 = 50;
 pub const TRIAL_REDS: u64 = 3;
 

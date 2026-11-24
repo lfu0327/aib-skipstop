@@ -107,7 +107,7 @@ What this repo's ledger says of the trial so far. It reads; it changes no mode.
 | `compared`, `same`, `differed` | a real run set beside the source it was (or would have been) reused from: audits in real mode, every run in observe mode. `differed` = a reuse that would have been wrong |
 | `incomparable`, `revoked`, `reds` | audits that could not be compared; sources revoked; units that ran and failed |
 | `ledger_problems` | ledger files that could not be read |
-| `bar` | `{days, compared, reds, differed, met}`: the bar for making real mode the default (7 days, 50 comparisons, 3 real failures seen, 0 that differed, no ledger problem) and whether every part is met |
+| `bar` | `{days, compared, reds, differed, met}`: the bar for making real mode the default (1 day / 24 hours, 50 comparisons, 3 real failures seen, 0 that differed, no ledger problem) and whether every part is met |
 
 ## The project's settings: `skipstop.json` at the repo's root
 

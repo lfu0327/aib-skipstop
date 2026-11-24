@@ -43,6 +43,9 @@
 //! A key the file does not know, a value out of its range, a key twice: errors. A setting a
 //! person wrote and the program did not understand must not run as the default instead.
 
+use crate::tiers::{
+    enforce_phase1, parse_overrides, PathTierRule, Tier, TierOverrides, TierPolicy,
+};
 use skipstop_audit::NeverReuse;
 use std::collections::BTreeMap;
 
@@ -66,6 +69,9 @@ pub struct Config {
     pub units: BTreeMap<String, CommandUnit>,
     pub never_reuse: BTreeMap<String, NeverReuse>,
     pub extra_inputs: BTreeMap<String, Vec<String>>,
+    pub tier: Option<Tier>,
+    pub overrides: TierOverrides,
+    pub paths: Vec<PathTierRule>,
     pub defense_period_days: i64,
     pub keep_days: i64,
 }
@@ -76,9 +82,43 @@ impl Default for Config {
             units: BTreeMap::new(),
             never_reuse: BTreeMap::new(),
             extra_inputs: BTreeMap::new(),
+            tier: None,
+            overrides: TierOverrides::default(),
+            paths: Vec::new(),
             defense_period_days: crate::real::DEFENSE_PERIOD_DAYS,
             keep_days: crate::real::KEEP_DAYS,
         }
+    }
+}
+
+impl Config {
+    /// Expand `tier` + `overrides` into all 8 fields and apply Phase 1 enforcement.
+    pub fn effective_policy(&self, has_hardware_sig: bool) -> (TierPolicy, bool) {
+        let base = TierPolicy::for_tier(self.tier.unwrap_or(Tier::Normal));
+        let expanded = self.overrides.apply(&base);
+        enforce_phase1(&expanded, has_hardware_sig)
+    }
+
+    /// Expand a specific path rule's policy and take the stricter of two matching policies.
+    pub fn policy_for_paths(
+        &self,
+        changed_paths: &[String],
+        has_hardware_sig: bool,
+    ) -> (TierPolicy, bool) {
+        let (mut eff, mut fell_back) = self.effective_policy(has_hardware_sig);
+        for rule in &self.paths {
+            if changed_paths
+                .iter()
+                .any(|p| crate::tiers::glob_match(&rule.glob, p))
+            {
+                let base = TierPolicy::for_tier(rule.tier.or(self.tier).unwrap_or(Tier::Normal));
+                let expanded = rule.overrides.apply(&base);
+                let (rule_eff, rule_fb) = enforce_phase1(&expanded, has_hardware_sig);
+                eff = eff.stricter(&rule_eff);
+                fell_back |= rule_fb;
+            }
+        }
+        (eff, fell_back)
     }
 }
 
@@ -244,6 +284,53 @@ pub fn parse_for(text: &str, windows: bool) -> Result<Config, String> {
                     c.units.insert(name.clone(), unit(name, v, windows)?);
                 }
             }
+            "tier" => {
+                let s = v.as_str().ok_or("\"tier\" is not a string")?;
+                c.tier = Some(
+                    Tier::from_word(s)
+                        .ok_or_else(|| format!("tier {s:?}: not strict, normal or fast"))?,
+                );
+            }
+            "overrides" => c.overrides = parse_overrides(v, "overrides")?,
+            "paths" => {
+                let list = v.as_array().ok_or("\"paths\" is not a list")?;
+                for (idx, item) in list.iter().enumerate() {
+                    let obj = item
+                        .as_object()
+                        .ok_or_else(|| format!("paths[{idx}] is not an object"))?;
+                    let glob = obj
+                        .get("glob")
+                        .and_then(|x| x.as_str())
+                        .filter(|s| !s.trim().is_empty())
+                        .ok_or_else(|| format!("paths[{idx}] needs a non-empty \"glob\""))?
+                        .to_string();
+                    let tier = match obj.get("tier") {
+                        Some(tv) => {
+                            let s = tv
+                                .as_str()
+                                .ok_or_else(|| format!("paths[{idx}].tier is not a string"))?;
+                            Some(Tier::from_word(s).ok_or_else(|| {
+                                format!("paths[{idx}].tier {s:?}: not strict, normal or fast")
+                            })?)
+                        }
+                        None => None,
+                    };
+                    let overrides = match obj.get("overrides") {
+                        Some(ov) => parse_overrides(ov, &format!("paths[{idx}].overrides"))?,
+                        None => TierOverrides::default(),
+                    };
+                    for k in obj.keys() {
+                        if !matches!(k.as_str(), "glob" | "tier" | "overrides") {
+                            return Err(format!("paths[{idx}]: \"{k}\" is not a path rule field"));
+                        }
+                    }
+                    c.paths.push(PathTierRule {
+                        glob,
+                        tier,
+                        overrides,
+                    });
+                }
+            }
             "defense_period_days" => c.defense_period_days = days(v, k, 1, 30)?,
             "keep_days" => c.keep_days = days(v, k, 8, 3650)?,
             other => return Err(format!("\"{other}\" is not a setting")),
@@ -307,6 +394,25 @@ mod tests {
         assert_eq!(c.never_reuse["gate"], NeverReuse::Security);
         assert_eq!(why_word(NeverReuse::Security), "never_reuse:security");
         assert_eq!(c.extra_inputs["skipstop-cargo"], vec!["docs/FORMATS.md"]);
+        let t = parse(
+            r#"{
+                "tier": "normal",
+                "overrides": {"cell_max_min": 60},
+                "paths": [{"glob": "crates/aibd/src/auth/**", "tier": "strict"}]
+            }"#,
+        )
+        .unwrap();
+        let (eff_normal, fb1) = t.policy_for_paths(&["crates/aibd/src/ui.rs".into()], false);
+        assert!(!fb1);
+        assert_eq!(eff_normal.cell_max_min, 60);
+        let (eff_strict, fb2) = t.policy_for_paths(&["crates/aibd/src/auth/key.rs".into()], false);
+        assert!(!fb2);
+        assert_eq!(eff_strict, TierPolicy::for_tier(Tier::Strict));
+
+        let fast = parse(r#"{"tier": "fast"}"#).unwrap();
+        let (eff_fb, fb3) = fast.effective_policy(false);
+        assert!(fb3);
+        assert_eq!(eff_fb, TierPolicy::for_tier(Tier::Strict));
         assert_eq!(
             strangers(
                 &c,

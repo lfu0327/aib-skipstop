@@ -13,6 +13,7 @@ pub mod config;
 pub mod real;
 pub mod repo;
 pub mod run_events;
+pub mod tiers;
 pub mod units;
 
 use skipstop_core::exit::Outcome;
