@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3 — 2026-11-24
+
+- **Tiered skip/stop policies (`T1` + `T2`).** Adds three built-in tiers (`strict`, `normal`, `fast`) plus custom overrides (`overrides`, `paths`), repo-wide settings (`repo_settings`: `linux_knives`, `knife_length_check`, `merge_batch_tz`/`merge_batch_hours`), and `aib-skipstop tier [--json]`. In Phase 1, `run()` enforces `observe`/`off` mode for unsigned relaxations and falls back to `strict` (`fell_back_to_strict`) while exposing `tier` and `verdict_label` in JSON output.
+- **24-hour trial window (`TRIAL_DAYS = 1`).** `aib-skipstop trial` (`S11 -> S17`) now requires 24 hours of history instead of 7 calendar days.
+
 ## 0.4.2 — 2026-11-24
 
 - **`trial` counts predicted-to-run real failures (`reds`).** Failures on audited or would-reuse units no longer count against the trial gate; consecutive identical `(unit, key)` failure runs count as one red.
