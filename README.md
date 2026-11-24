@@ -240,6 +240,12 @@ A key is the hash of the files a unit reads. A test that reads the network, depl
 or depends on the date has an input no file holds: name it in `never_reuse` and it runs every
 time. A file that is not understood stops the run; it never runs as the defaults instead.
 
+## Cross-platform CI & concurrency
+
+By default, ledger and event directories use concurrent-safe creation (`ensure_dir`), so multiple processes on macOS, Linux, and Windows can write at once without `AlreadyExists` / `os error 183` races.
+
+In CI, keep expensive `macos-latest` / `windows-latest` runners for OS-specific units only, and run platform-independent units on `ubuntu-latest` (using `run` / `run_windows` in `skipstop.json` when needed).
+
 ## Formats
 
 `docs/FORMATS.md`: exit codes, the run's JSON and every `plan` word, `saved --json`, the events
