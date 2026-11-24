@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4 — 2026-11-24
+
+- **Align tier schema with DESIGN r4 (`§2`, `§4`, `§12.12–13`).** Uses exact 8 tier fields (`reuse`, `spot`, `knives`, `retry_miss`, `platforms`, `overflow`, `cell_max_min`, `cells_max`), removes non-design options (`off`/`observe`/`linux_only`/`fail`/`stop`), and moves `script_max_knives` (140, `20..=300`) and `script_max_min` (15, `5..=30`) into `RepoSettings`.
+
 ## 0.4.3 — 2026-11-24
 
 - **Tiered skip/stop policies (`T1` + `T2`).** Adds three built-in tiers (`strict`, `normal`, `fast`) plus custom overrides (`overrides`, `paths`), repo-wide settings (`repo_settings`: `linux_knives`, `knife_length_check`, `merge_batch_tz`/`merge_batch_hours`), and `aib-skipstop tier [--json]`. In Phase 1, `run()` enforces `observe`/`off` mode for unsigned relaxations and falls back to `strict` (`fell_back_to_strict`) while exposing `tier` and `verdict_label` in JSON output.
