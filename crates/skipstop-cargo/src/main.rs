@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--plan] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]\n       aib-skipstop trial [--json] [--state <dir>]\n       aib-skipstop stop [--config <file>] [--mode observe|real] [--no-stop] [--state <dir>] (check | -- <command>...)";
+const USAGE: &str = "usage: aib-skipstop [-p <package>]... [--mode observe|real] [--fresh] [--plan] [--json] [--why] [--state <dir>]\n       aib-skipstop mode [observe|real] [--state <dir>]\n       aib-skipstop saved [--json] [--state <dir>] [--utc-offset <minutes>]\n       aib-skipstop trial [--json] [--state <dir>]\n       aib-skipstop tier [--json]\n       aib-skipstop stop [--config <file>] [--mode observe|real] [--no-stop] [--state <dir>] (check | -- <command>...)";
 
 struct Args {
     packages: Vec<String>,
@@ -36,6 +36,8 @@ struct Args {
     saved: bool,
     /// `trial`: what the ledger says of the trial so far
     trial: bool,
+    /// `tier`: print the expanded tier policy and repo-wide settings
+    tier: bool,
     /// real mode: a unit with a source that no audit picked is not run
     real: bool,
     /// `--mode` as given on the command line, which wins over everything else
@@ -59,6 +61,7 @@ fn args() -> Result<Args, String> {
         help: false,
         saved: false,
         trial: false,
+        tier: false,
         real: false,
         mode_flag: None,
         mode_cmd: None,
@@ -89,6 +92,7 @@ fn args() -> Result<Args, String> {
             "--plan" => a.plan_only = true,
             "saved" if !a.saved && a.packages.is_empty() => a.saved = true,
             "trial" if !a.trial && !a.saved && a.packages.is_empty() => a.trial = true,
+            "tier" if !a.tier && !a.trial && !a.saved && a.packages.is_empty() => a.tier = true,
             "--utc-offset" => {
                 let v = it.next().ok_or("--utc-offset needs minutes")?;
                 a.utc_offset = v
@@ -188,6 +192,66 @@ fn cargo(root: &Path, a: &[String]) -> Result<std::process::Output, String> {
         .args(a)
         .output()
         .map_err(|e| format!("cargo: {e}"))
+}
+
+fn tier_report(a: &Args) -> Result<String, String> {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let root = key::repo_root(&cwd).map_err(|e| format!("{e:?}"))?;
+    let config = skipstop_cargo::config::load(&root)?;
+    let (policy, policy_fb) = config.effective_policy(false);
+    let (repo_settings, repo_fb) = config.effective_repo_settings(false);
+    let fell_back = policy_fb || repo_fb;
+    let tier_word = if fell_back {
+        "strict"
+    } else {
+        config
+            .tier
+            .unwrap_or(skipstop_cargo::tiers::Tier::Normal)
+            .word()
+    };
+    if a.json {
+        return Ok(format!(
+            "{}\n",
+            serde_json::json!({
+                "v": 1,
+                "tier": tier_word,
+                "fell_back_to_strict": fell_back,
+                "policy": {
+                    "reuse": policy.reuse.word(),
+                    "spot_every": policy.spot_every,
+                    "knives": policy.knives.word(),
+                    "platforms": policy.platforms.word(),
+                    "stop": policy.stop.word(),
+                    "cell_max_min": policy.cell_max_min,
+                    "script_max_knives": policy.script_max_knives,
+                    "script_max_min": policy.script_max_min,
+                    "overflow": policy.overflow.word(),
+                },
+                "repo_settings": {
+                    "linux_knives": repo_settings.linux_knives,
+                    "knife_length_check": repo_settings.knife_length_check.word(),
+                    "merge_batch_tz": repo_settings.merge_batch_tz,
+                    "merge_batch_hours": repo_settings.merge_batch_hours,
+                }
+            })
+        ));
+    }
+    Ok(format!(
+        "tier={tier_word} fell_back_to_strict={fell_back} reuse={} spot=1/{} knives={} platforms={} stop={} cell_max_min={} script_max_knives={} script_max_min={} overflow={}\nrepo: linux_knives={} knife_length_check={} merge_batch={}:{:?}\n",
+        policy.reuse.word(),
+        policy.spot_every,
+        policy.knives.word(),
+        policy.platforms.word(),
+        policy.stop.word(),
+        policy.cell_max_min,
+        policy.script_max_knives,
+        policy.script_max_min,
+        policy.overflow.word(),
+        repo_settings.linux_knives,
+        repo_settings.knife_length_check.word(),
+        repo_settings.merge_batch_tz,
+        repo_settings.merge_batch_hours,
+    ))
 }
 
 /// `aib-skipstop trial`: the repo's ledger as a trial report. It reads; it changes no mode.
@@ -521,6 +585,18 @@ fn main() -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
+    if a.tier {
+        return match tier_report(&a) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("aib-skipstop: {e}");
+                ExitCode::from(Exit::EngineError.code() as u8)
+            }
+        };
+    }
     if a.trial {
         return match trial_report(&a) {
             Ok(text) => {
@@ -576,6 +652,27 @@ fn run(a: &Args) -> Result<Exit, String> {
     // the project's own settings; a file that is there and not understood stops the run: it
     // must not run as the defaults instead (a unit said never to be reused would be reused)
     let config = skipstop_cargo::config::load(&root)?;
+    let (tier_policy, tier_fell_back) = config.effective_policy(false);
+    if tier_fell_back {
+        eprintln!("aib-skipstop: unsigned relaxation in Phase 1 fell back to strict (main_exact)");
+    }
+    let effective_tier = if tier_fell_back {
+        skipstop_cargo::tiers::Tier::Strict
+    } else {
+        config.tier.unwrap_or(skipstop_cargo::tiers::Tier::Normal)
+    };
+    let effective_real =
+        a.real && !matches!(tier_policy.reuse, skipstop_cargo::tiers::ReuseMode::Observe);
+    let effective_fresh =
+        a.fresh || matches!(tier_policy.reuse, skipstop_cargo::tiers::ReuseMode::Off);
+    let a = &Args {
+        packages: a.packages.clone(),
+        state: a.state.clone(),
+        mode_cmd: a.mode_cmd.clone(),
+        real: effective_real,
+        fresh: effective_fresh,
+        ..*a
+    };
     let file = skipstop_cargo::config::FILE;
     let mut all: Vec<String> = ws.packages.iter().map(|p| p.name.clone()).collect();
     if let Some(twice) = config.units.keys().find(|u| all.contains(u)) {
@@ -1089,6 +1186,9 @@ fn run(a: &Args) -> Result<Exit, String> {
         .iter()
         .filter(|r| r.source_result == Some(r.result))
         .count();
+    let not_passed = rows.iter().filter(|r| r.result != Outcome::Pass).count();
+    let verdict_label =
+        skipstop_cargo::tiers::classify_verdict(effective_tier, not_passed, 0, 0, 0);
     if a.json {
         let v: Vec<serde_json::Value> = rows
             .iter()
@@ -1109,6 +1209,9 @@ fn run(a: &Args) -> Result<Exit, String> {
             "{}",
             serde_json::json!({"invocation_id": inv, "head": head, "dirty": dirty,
                 "mode": if a.real { "real" } else { "observe" }, "defense_round": defense_round,
+                "tier": effective_tier.word(),
+                "fell_back_to_strict": tier_fell_back,
+                "verdict_label": verdict_label.word_zh(),
                 "ledger_files_expired": expired_files,
                 "cases_run": cases.len(),
                 "exit": code.code(), "units": v, "ledger_problems": problems})

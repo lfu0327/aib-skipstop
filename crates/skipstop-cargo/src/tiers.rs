@@ -82,6 +82,14 @@ impl KnifeScope {
             _ => None,
         }
     }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Affected => "affected",
+            Self::Changed => "changed",
+        }
+    }
 }
 
 /// Ordered from strictest (`Both`) to loosest (`LinuxOnly`).
@@ -101,6 +109,14 @@ impl PlatformScope {
             _ => None,
         }
     }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Both => "both",
+            Self::Native => "native",
+            Self::LinuxOnly => "linux_only",
+        }
+    }
 }
 
 /// Ordered from strictest (`Reject`) to loosest (`Warn`).
@@ -118,6 +134,13 @@ impl StopMode {
             _ => None,
         }
     }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Reject => "reject",
+            Self::Warn => "warn",
+        }
+    }
 }
 
 /// Ordered from strictest (`AddCell`) to loosest (`Trim`).
@@ -133,6 +156,13 @@ impl OverflowMode {
             "add_cell" => Some(Self::AddCell),
             "trim" => Some(Self::Trim),
             _ => None,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::AddCell => "add_cell",
+            Self::Trim => "trim",
         }
     }
 }
@@ -386,6 +416,85 @@ pub fn classify_verdict(
         Tier::Strict => VerdictLabel::StrictPass,
         Tier::Normal | Tier::Fast => VerdictLabel::NormalPass,
     }
+}
+
+/// Three repo-wide settings (DESIGN r3 §4 & §12.9):
+/// platform-independent knives on Linux, knife script length check, and merge batch schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoSettings {
+    pub linux_knives: bool,
+    pub knife_length_check: StopMode,
+    pub merge_batch_tz: String,
+    pub merge_batch_hours: Vec<u32>,
+}
+
+impl Default for RepoSettings {
+    fn default() -> Self {
+        Self {
+            linux_knives: false,
+            knife_length_check: StopMode::Reject,
+            merge_batch_tz: "Asia/Taipei".to_string(),
+            merge_batch_hours: vec![10, 16, 22],
+        }
+    }
+}
+
+pub fn enforce_repo_phase1(r: &RepoSettings, has_hardware_sig: bool) -> (RepoSettings, bool) {
+    if has_hardware_sig || (!r.linux_knives && r.knife_length_check == StopMode::Reject) {
+        return (r.clone(), false);
+    }
+    let mut safe = r.clone();
+    safe.linux_knives = false;
+    safe.knife_length_check = StopMode::Reject;
+    (safe, true)
+}
+
+pub fn parse_repo_settings(v: &serde_json::Value) -> Result<RepoSettings, String> {
+    let o = v.as_object().ok_or("\"repo_settings\" is not an object")?;
+    let mut out = RepoSettings::default();
+    for (k, val) in o {
+        match k.as_str() {
+            "linux_knives" => {
+                out.linux_knives = val
+                    .as_bool()
+                    .ok_or("repo_settings: \"linux_knives\" is not a boolean")?;
+            }
+            "knife_length_check" => {
+                let s = val
+                    .as_str()
+                    .ok_or("repo_settings: \"knife_length_check\" is not a string")?;
+                out.knife_length_check = StopMode::from_word(s)
+                    .ok_or_else(|| format!("repo_settings: \"{s}\" is not reject or warn"))?;
+            }
+            "merge_batch_tz" => {
+                let s = val
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+                    .ok_or("repo_settings: \"merge_batch_tz\" must be a non-empty string")?;
+                out.merge_batch_tz = s.to_string();
+            }
+            "merge_batch_hours" => {
+                let arr = val
+                    .as_array()
+                    .ok_or("repo_settings: \"merge_batch_hours\" is not a list")?;
+                let mut hours = Vec::with_capacity(arr.len());
+                for item in arr {
+                    let h = item
+                        .as_u64()
+                        .and_then(|n| u32::try_from(n).ok())
+                        .filter(|&h| h <= 23)
+                        .ok_or("repo_settings: \"merge_batch_hours\" entries must be 0..=23")?;
+                    hours.push(h);
+                }
+                if hours.is_empty() {
+                    return Err("repo_settings: \"merge_batch_hours\" cannot be empty".into());
+                }
+                out.merge_batch_hours = hours;
+            }
+            other => return Err(format!("repo_settings: \"{other}\" is not a setting")),
+        }
+    }
+    Ok(out)
 }
 
 /// Parse `TierOverrides` from a JSON object, rejecting unknown keys and out-of-range numbers.

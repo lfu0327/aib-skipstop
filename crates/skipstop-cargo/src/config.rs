@@ -44,7 +44,8 @@
 //! person wrote and the program did not understand must not run as the default instead.
 
 use crate::tiers::{
-    enforce_phase1, parse_overrides, PathTierRule, Tier, TierOverrides, TierPolicy,
+    enforce_phase1, enforce_repo_phase1, parse_overrides, parse_repo_settings, PathTierRule,
+    RepoSettings, Tier, TierOverrides, TierPolicy,
 };
 use skipstop_audit::NeverReuse;
 use std::collections::BTreeMap;
@@ -72,6 +73,7 @@ pub struct Config {
     pub tier: Option<Tier>,
     pub overrides: TierOverrides,
     pub paths: Vec<PathTierRule>,
+    pub repo_settings: RepoSettings,
     pub defense_period_days: i64,
     pub keep_days: i64,
 }
@@ -85,6 +87,7 @@ impl Default for Config {
             tier: None,
             overrides: TierOverrides::default(),
             paths: Vec::new(),
+            repo_settings: RepoSettings::default(),
             defense_period_days: crate::real::DEFENSE_PERIOD_DAYS,
             keep_days: crate::real::KEEP_DAYS,
         }
@@ -97,6 +100,10 @@ impl Config {
         let base = TierPolicy::for_tier(self.tier.unwrap_or(Tier::Normal));
         let expanded = self.overrides.apply(&base);
         enforce_phase1(&expanded, has_hardware_sig)
+    }
+
+    pub fn effective_repo_settings(&self, has_hardware_sig: bool) -> (RepoSettings, bool) {
+        enforce_repo_phase1(&self.repo_settings, has_hardware_sig)
     }
 
     /// Expand a specific path rule's policy and take the stricter of two matching policies.
@@ -331,6 +338,7 @@ pub fn parse_for(text: &str, windows: bool) -> Result<Config, String> {
                     });
                 }
             }
+            "repo_settings" => c.repo_settings = parse_repo_settings(v)?,
             "defense_period_days" => c.defense_period_days = days(v, k, 1, 30)?,
             "keep_days" => c.keep_days = days(v, k, 8, 3650)?,
             other => return Err(format!("\"{other}\" is not a setting")),
