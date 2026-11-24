@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 — 2026-11-24
+
+- **`saved --json` includes `recent`.** Up to 20 newest real-mode time-saving events (`at`, `system`, `confirmed`, `saved_ms`, `avoided`, `basis`), net of revoked or wrong-stop entries, for AIB's chat bar and filter.
+
 ## 0.4.0 — 2026-11-23
 
 - **The ledger is kept per clone, not per folder name.** Until now a repo's runs were kept under

@@ -1,7 +1,7 @@
 {
   "schema": "aib-plugin/v1",
   "name": "aib-skipstop",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "summary": "Skip what need not run again, stop what is sure to fail, and keep the book of what that saved.",
   "license": "Apache-2.0",
   "homepage": "https://github.com/lfu0327/aib-skipstop",
