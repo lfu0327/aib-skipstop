@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.5 — 2026-11-25
+
+- **Default concurrent-safe directory creation (`ensure_dir`).** Tolerates `AlreadyExists` / Windows `os error 183` races in `skipstop-ledger` and `skipstop-core` by default, backed by a 5-round two-process concurrent mkdir test.
+- **Cross-platform CI guidance (`README.md`).** Documents concurrent mkdir defaults and splitting OS-specific vs Linux-runnable tests.
+
 ## 0.4.4 — 2026-11-24
 
 - **Align tier schema with DESIGN r4 (`§2`, `§4`, `§12.12–13`).** Uses exact 8 tier fields (`reuse`, `spot`, `knives`, `retry_miss`, `platforms`, `overflow`, `cell_max_min`, `cells_max`), removes non-design options (`off`/`observe`/`linux_only`/`fail`/`stop`), and moves `script_max_knives` (140, `20..=300`) and `script_max_min` (15, `5..=30`) into `RepoSettings`.
