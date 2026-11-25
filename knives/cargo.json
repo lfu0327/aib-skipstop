@@ -1100,8 +1100,8 @@
    "id": "cargo-TR1",
    "why": "the bar is met with a comparison that differed",
    "file": "crates/skipstop-cargo/src/real.rs",
-   "old": "            && self.differed == 0",
-   "new": "            && self.differed <= self.same",
+   "old": "        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED && self.differed == 0",
+   "new": "        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED && self.differed <= self.same",
    "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
    "cmd": [
     "cargo",
@@ -1134,6 +1134,54 @@
    "file": "crates/skipstop-cargo/src/real.rs",
    "old": "        if !real && !observe {",
    "new": "        if !real && !observe && s.units.is_empty() {",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TR4",
+   "why": "real failures seen are a part of the bar again (Andy 11-25: they are a record only)",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED && self.differed == 0",
+   "new": "        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED && self.differed == 0 && self.reds >= 3",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TR5",
+   "why": "the bar is met whatever the comparisons that differed",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED && self.differed == 0",
+   "new": "        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TR6",
+   "why": "real failures are no longer counted now that they are a record",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "            t.reds += 1;",
+   "new": "            let _ = 1; // knife",
    "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
    "cmd": [
     "cargo",

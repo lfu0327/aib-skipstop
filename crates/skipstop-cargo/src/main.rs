@@ -275,7 +275,7 @@ fn trial_report(a: &Args) -> Result<String, String> {
                 "revoked": t.revoked, "reds": t.reds,
                 "ledger_problems": problems,
                 "bar": {"days": real::TRIAL_DAYS, "compared": real::TRIAL_COMPARED,
-                        "reds": real::TRIAL_REDS, "differed": 0, "met": bar},
+                        "differed": 0, "met": bar},
             })
         ));
     }
@@ -290,7 +290,7 @@ fn trial_report(a: &Args) -> Result<String, String> {
     ));
     s.push_str("the bar for making real mode the default (a person's decision; nothing here changes the mode):\n");
     s.push_str(&format!(
-        "  {:<8} a week of history: {} of {} days\n",
+        "  {:<8} history: {} of {} day(s)\n",
         mark(t.days >= real::TRIAL_DAYS),
         t.days,
         real::TRIAL_DAYS
@@ -302,15 +302,13 @@ fn trial_report(a: &Args) -> Result<String, String> {
         real::TRIAL_COMPARED
     ));
     s.push_str(&format!(
-        "  {:<8} real failures seen: {} of {}\n",
-        mark(t.reds >= real::TRIAL_REDS),
-        t.reds,
-        real::TRIAL_REDS
-    ));
-    s.push_str(&format!(
         "  {:<8} comparisons that differed: {} (must be 0)\n",
         mark(t.differed == 0),
         t.differed
+    ));
+    s.push_str(&format!(
+        "  record   real failures seen: {} (kept as a record; not a part of the bar)\n",
+        t.reds
     ));
     for p in &problems {
         s.push_str(&format!("  not yet  a ledger file cannot be read: {p}\n"));

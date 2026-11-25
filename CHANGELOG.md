@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.6 — 2026-11-25
+
+- **`trial`: real failures seen are a record, not a part of the bar (owner's decision 11-25).** The bar is now 1 day of history + 50 comparisons + 0 that differed (+ no ledger problem); one comparison that differed still fails it. `reds` is still counted and printed (human output: a `record` line; `--json`: top-level `reds`). **Format change:** `trial --json` `bar` no longer has a `reds` key (`{days, compared, differed, met}`); `TRIAL_REDS` is removed. Knives TR4–TR6 bite when reds rejoin the bar, when the differed condition is dropped, and when reds stop being counted.
+
 ## 0.4.5 — 2026-11-25
 
 - **Default concurrent-safe directory creation (`ensure_dir`).** Tolerates `AlreadyExists` / Windows `os error 183` races in `skipstop-ledger` and `skipstop-core` by default, backed by a 5-round two-process concurrent mkdir test.

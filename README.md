@@ -198,8 +198,9 @@ aib-skipstop trial
 prints what this repo's ledger has seen: how often a reused result was set beside a real run
 (every run in observe mode, every audit in real mode), how many agreed, how many differed, and
 how many real failures the runs found. Under it, the bar the first user of this tool set for
-making real mode the default: a week of history, fifty comparisons, three real failures seen,
-and **not one comparison that differed**. The command decides nothing; it shows what there is
+making real mode the default: a day (24 hours) of history, fifty comparisons, and **not one
+comparison that differed**. Real failures found are printed as a record only; they are not a
+part of the bar. The command decides nothing; it shows what there is
 to decide on.
 
 ## A project's settings

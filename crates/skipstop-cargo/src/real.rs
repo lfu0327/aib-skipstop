@@ -218,15 +218,16 @@ pub struct Trial {
     pub incomparable: u64,
     /// sources revoked
     pub revoked: u64,
-    /// units that ran and failed: failures the runs did find
+    /// units that ran and failed: failures the runs did find. Recorded and printed only; not
+    /// part of the bar (Andy 11-25: real failures caught are a record, they do not hold it back)
     pub reds: u64,
 }
 
-/// The owner's bar for trusting reuse (Andy 11-24): 24 hours (1 day) of history,
-/// fifty comparisons, three real failures seen, and not one comparison that differed.
+/// The owner's bar for trusting reuse (Andy 11-24, 11-25): 24 hours (1 day) of history,
+/// fifty comparisons, and not one comparison that differed. Real failures seen (`reds`) are
+/// counted beside it as a record, not as a part of it.
 pub const TRIAL_DAYS: i64 = 1;
 pub const TRIAL_COMPARED: u64 = 50;
-pub const TRIAL_REDS: u64 = 3;
 
 impl Trial {
     pub fn compared(&self) -> u64 {
@@ -234,10 +235,7 @@ impl Trial {
     }
     /// Every part of the bar is met. One comparison that differed fails it whatever the rest.
     pub fn meets_the_bar(&self) -> bool {
-        self.days >= TRIAL_DAYS
-            && self.compared() >= TRIAL_COMPARED
-            && self.reds >= TRIAL_REDS
-            && self.differed == 0
+        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED && self.differed == 0
     }
 }
 
@@ -896,15 +894,23 @@ mod tests {
         assert_eq!(t.compared(), 2);
         assert!(!t.meets_the_bar(), "two comparisons are not fifty");
 
-        // the bar: a week, fifty comparisons, three reds, none that differed
+        // the bar: a day, fifty comparisons, none that differed; no real failure needed
         let met = Trial {
             first_at_ms: Some(0),
             days: TRIAL_DAYS,
             same: TRIAL_COMPARED,
-            reds: TRIAL_REDS,
+            reds: 0,
             ..Trial::default()
         };
-        assert!(met.meets_the_bar());
+        assert!(
+            met.meets_the_bar(),
+            "reds are a record, not a part of the bar"
+        );
+        assert!(Trial {
+            reds: 7,
+            ..met.clone()
+        }
+        .meets_the_bar());
         for short in [
             Trial {
                 days: TRIAL_DAYS - 1,
@@ -912,10 +918,6 @@ mod tests {
             },
             Trial {
                 same: TRIAL_COMPARED - 1,
-                ..met.clone()
-            },
-            Trial {
-                reds: TRIAL_REDS - 1,
                 ..met.clone()
             },
             // one reuse that would have been wrong, among a thousand that were right

@@ -105,9 +105,9 @@ What this repo's ledger says of the trial so far. It reads; it changes no mode.
 | `runs_real`, `runs_observe` | finished runs (a killed run is not counted) |
 | `reused` | units not run |
 | `compared`, `same`, `differed` | a real run set beside the source it was (or would have been) reused from: audits in real mode, every run in observe mode. `differed` = a reuse that would have been wrong |
-| `incomparable`, `revoked`, `reds` | audits that could not be compared; sources revoked; units that ran and failed |
+| `incomparable`, `revoked`, `reds` | audits that could not be compared; sources revoked; units that ran and failed (`reds` is a record only, not a part of the bar, since 0.4.6) |
 | `ledger_problems` | ledger files that could not be read |
-| `bar` | `{days, compared, reds, differed, met}`: the bar for making real mode the default (1 day / 24 hours, 50 comparisons, 3 real failures seen, 0 that differed, no ledger problem) and whether every part is met |
+| `bar` | `{days, compared, differed, met}`: the bar for making real mode the default (1 day / 24 hours, 50 comparisons, 0 that differed, no ledger problem) and whether every part is met. Until 0.4.5 it also had `reds` (3 real failures seen); 0.4.6 removed that key: real failures are only counted, in the top-level `reds` |
 
 ## The project's settings: `skipstop.json` at the repo's root
 
