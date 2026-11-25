@@ -476,11 +476,20 @@ fn write_carry(p: &Path, c: &real::Carry) -> Result<(), String> {
 
 /// Delete the expired runs' ledger files, each folded into the trial's record first; when
 /// the record cannot be read or written, no file is deleted. Returns how many went.
+///
+/// The ledger of a clone is shared by its working trees, so two runs can expire the same
+/// files from snapshots read at different times (f163c f215e352 M1). The whole of it runs
+/// under `trial/<repo>.lock` (made with create_new: one holder); a run that finds it held
+/// leaves expiry to the holder. Inside, a run is folded only while its file is still there:
+/// a file another run already folded and deleted is not counted again from an old snapshot.
 fn expire_ledger(state: &Path, rid: &str, old: &[&ledger::Stream]) -> usize {
     if old.is_empty() {
         return 0;
     }
     let cp = carry_path(state, rid);
+    let Some(_lock) = TrialLock::take(&cp.with_extension("lock")) else {
+        return 0;
+    };
     let mut c = match read_carry(&cp) {
         Ok(c) => c,
         Err(e) => {
@@ -488,20 +497,30 @@ fn expire_ledger(state: &Path, rid: &str, old: &[&ledger::Stream]) -> usize {
             return 0;
         }
     };
+    let file =
+        |s: &ledger::Stream| ledger::stream_path(&state.join("ledger"), rid, &s.invocation_id);
+    let mut here = Vec::new();
     for s in old {
+        if !file(s).is_file() {
+            // gone: another run folded it and deleted it, or a person did
+            continue;
+        }
         if !c.folded.contains(&s.invocation_id) {
             real::fold(&mut c, s);
             c.folded.push(s.invocation_id.clone());
         }
+        here.push(*s);
+    }
+    if here.is_empty() {
+        return 0;
     }
     if let Err(e) = write_carry(&cp, &c) {
         eprintln!("aib-skipstop: old ledger files kept: the trial's record cannot be written: {e}");
         return 0;
     }
     let mut gone = 0;
-    for s in old {
-        let f = ledger::stream_path(&state.join("ledger"), rid, &s.invocation_id);
-        if std::fs::remove_file(f).is_ok() {
+    for s in here {
+        if std::fs::remove_file(file(s)).is_ok() {
             gone += 1;
             c.folded.retain(|i| i != &s.invocation_id);
         }
@@ -510,6 +529,47 @@ fn expire_ledger(state: &Path, rid: &str, old: &[&ledger::Stream]) -> usize {
     // is harmless (a folded id whose file is gone matches nothing)
     let _ = write_carry(&cp, &c);
     gone
+}
+
+/// The one holder of a repo's trial record while it is changed; let go when dropped.
+struct TrialLock(PathBuf);
+
+impl TrialLock {
+    /// A lock older than this was left by a run that died: taken away, and taken again once.
+    const STALE_S: u64 = 3600;
+
+    fn take(p: &Path) -> Option<TrialLock> {
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).ok()?;
+        }
+        for _ in 0..2 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(p)
+            {
+                Ok(_) => return Some(TrialLock(p.to_path_buf())),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let old = std::fs::metadata(p)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|a| a.as_secs() > Self::STALE_S);
+                    if !old || std::fs::remove_file(p).is_err() {
+                        return None;
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+}
+
+impl Drop for TrialLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// Every run of this repo in the ledger (see `skipstop_cargo::repo`), and its id. A clone
@@ -1582,7 +1642,18 @@ mod tests {
         assert_eq!(ledger::streams(&lr, rid).0.len(), 3);
 
         std::fs::remove_file(&cp).unwrap();
+        // another run holds the record: this one leaves expiry to it
+        let lock = cp.with_extension("lock");
+        std::fs::write(&lock, "").unwrap();
+        assert_eq!(expire_ledger(&d, rid, &old), 0);
+        assert_eq!(ledger::streams(&lr, rid).0.len(), 3);
+        std::fs::remove_file(&lock).unwrap();
+
         assert_eq!(expire_ledger(&d, rid, &old), 2);
+        assert!(!lock.exists(), "the lock is let go");
+        // another working tree calls with the snapshot it read before these files went
+        // (f163c M1): nothing is folded twice
+        assert_eq!(expire_ledger(&d, rid, &old), 0);
         let (after, _) = ledger::streams(&lr, rid);
         let carry = read_carry(&cp).unwrap();
         let _ = std::fs::remove_dir_all(&d);

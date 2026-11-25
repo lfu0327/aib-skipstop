@@ -1292,10 +1292,10 @@
   },
   {
    "id": "cargo-TE3",
-   "why": "trial does not read what was kept of expired runs (an upgrade looks like a reset)",
+   "why": "trial does not read the counts kept of expired runs (an upgrade or an expiry looks like a reset)",
    "file": "crates/skipstop-cargo/src/main.rs",
    "old": "    let t = real::trial_with(&carry, &streams, now_ms() / 1000);",
-   "new": "    let t = real::trial_with(&real::Carry::default(), &streams, now_ms() / 1000);",
+   "new": "    let t = real::trial_with(&real::Carry { t: real::Trial::default(), ..carry }, &streams, now_ms() / 1000);",
    "test": "an_upgrade_keeps_the_trials_counts_and_its_first_run_and_the_bar_is_met_without_reds",
    "cmd": [
     "cargo",
@@ -1305,6 +1305,40 @@
     "--locked",
     "--test",
     "real_mode"
+   ]
+  },
+  {
+   "id": "cargo-TE4",
+   "why": "a run another working tree already folded and deleted is folded again from an old snapshot",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "        if !file(s).is_file() {",
+   "new": "        if false {",
+   "test": "an_expired_runs_file_goes_only_after_its_counts_are_kept",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-TE5",
+   "why": "expiry runs while another run holds the trial's record",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    let Some(_lock) = TrialLock::take(&cp.with_extension(\"lock\")) else {",
+   "new": "    let Some(_lock) = TrialLock::take(&cp.with_extension(\"lock\")).or(Some(TrialLock(PathBuf::new()))) else {",
+   "test": "an_expired_runs_file_goes_only_after_its_counts_are_kept",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
    ]
   },
   {

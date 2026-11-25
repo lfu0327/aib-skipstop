@@ -140,7 +140,9 @@ compares the outcome only: there are no cases to compare.
 
 What `trial` counted of runs whose ledger files expired, so the trial goes on and is never
 cleared by expiry, by meeting the bar, by a mode or by a version. Before an expired file is
-deleted its run is added here; if this file cannot be read or written, no ledger file is
+deleted its run is added here, under `<state>/trial/<repo>.lock` (one holder; a lock older than an
+hour is taken as left by a run that died) and only while the file is still there, so working
+trees sharing one ledger never add a run twice; if this file cannot be read or written, no ledger file is
 deleted, and `trial` lists it under `ledger_problems` (the bar is not met). Nothing in this
 program clears it.
 
@@ -148,7 +150,7 @@ program clears it.
 |---|---|
 | `first_at_ms` | the first finished run, ms since 1970 UTC, or `null` |
 | `runs_real`, `runs_observe`, `reused`, `same`, `differed`, `incomparable`, `revoked`, `reds` | the same counts as `trial --json`, of the runs kept here |
-| `last_fail_sig` | `[[unit, key or null], …]` of the last run kept, or `null`: the same failure on both sides of the line is one red |
+| `last_fail_sig` | `[[unit, key or null], …]` of the last run kept, or `null`: the same failure on both sides of the line is one red. A file that holds a revocation never expires, so it is counted after runs already kept that were newer than it: the red count (a record only) can differ by one from counting every run in time order |
 | `folded` | runs kept here whose file may still be there (a delete that failed): not counted twice |
 
 ## The events book: `<state>/events/<YYYY-MM>.jsonl`
