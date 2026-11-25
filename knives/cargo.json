@@ -1116,8 +1116,8 @@
    "id": "cargo-TR2",
    "why": "a run that was killed is counted in the trial",
    "file": "crates/skipstop-cargo/src/real.rs",
-   "old": "    for s in streams.iter().filter(|s| s.complete()) {",
-   "new": "    for s in streams.iter() {",
+   "old": "    if !Stream::complete(s) {",
+   "new": "    if false {",
    "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
    "cmd": [
     "cargo",
@@ -1132,8 +1132,8 @@
    "id": "cargo-TR3",
    "why": "another program's runs in the same ledger are counted in the trial",
    "file": "crates/skipstop-cargo/src/real.rs",
-   "old": "        if !real && !observe {",
-   "new": "        if !real && !observe && s.units.is_empty() {",
+   "old": "    if !real && !observe {",
+   "new": "    if !real && !observe && s.units.is_empty() {",
    "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
    "cmd": [
     "cargo",
@@ -1180,8 +1180,8 @@
    "id": "cargo-TR6",
    "why": "real failures are no longer counted now that they are a record",
    "file": "crates/skipstop-cargo/src/real.rs",
-   "old": "            t.reds += 1;",
-   "new": "            let _ = 1; // knife",
+   "old": "        t.reds += 1;",
+   "new": "        let _ = 1; // knife",
    "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
    "cmd": [
     "cargo",
@@ -1190,6 +1190,121 @@
     "skipstop-cargo",
     "--locked",
     "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TC1",
+   "why": "a run already kept from an expired file is counted again while its file is still there",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        .filter(|s| !carry.folded.contains(&s.invocation_id))",
+   "new": "        .filter(|_| true) // knife",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TC2",
+   "why": "the last failure kept is forgotten, so one failure across the line is two reds",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "    let mut c = carry.clone();",
+   "new": "    let mut c = Carry { last_fail_sig: None, ..carry.clone() };",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TC3",
+   "why": "the last failure is not written in the record",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "        \"last_fail_sig\": c.last_fail_sig,",
+   "new": "        \"last_fail_sig\": serde_json::Value::Null,",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TC4",
+   "why": "a record without its reds reads as 0 reds",
+   "file": "crates/skipstop-cargo/src/real.rs",
+   "old": "            reds: n(\"reds\")?,",
+   "new": "            reds: n(\"reds\").unwrap_or(0),",
+   "test": "the_trial_counts_every_comparison_and_one_that_differed_fails_the_bar",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--lib"
+   ]
+  },
+  {
+   "id": "cargo-TE1",
+   "why": "an expired run's file goes without its counts being kept (expiry clears the record)",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "            real::fold(&mut c, s);",
+   "new": "            let _ = s; // knife",
+   "test": "an_expired_runs_file_goes_only_after_its_counts_are_kept",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-TE2",
+   "why": "files go though the record could not be read",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    let mut c = match read_carry(&cp) {",
+   "new": "    let mut c = match read_carry(&cp).or_else(|_| Ok::<_, String>(real::Carry::default())) {",
+   "test": "an_expired_runs_file_goes_only_after_its_counts_are_kept",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--bin",
+    "aib-skipstop"
+   ]
+  },
+  {
+   "id": "cargo-TE3",
+   "why": "trial does not read what was kept of expired runs (an upgrade looks like a reset)",
+   "file": "crates/skipstop-cargo/src/main.rs",
+   "old": "    let t = real::trial_with(&carry, &streams, now_ms() / 1000);",
+   "new": "    let t = real::trial_with(&real::Carry::default(), &streams, now_ms() / 1000);",
+   "test": "an_upgrade_keeps_the_trials_counts_and_its_first_run_and_the_bar_is_met_without_reds",
+   "cmd": [
+    "cargo",
+    "test",
+    "-p",
+    "skipstop-cargo",
+    "--locked",
+    "--test",
+    "real_mode"
    ]
   },
   {

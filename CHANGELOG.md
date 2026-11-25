@@ -3,6 +3,7 @@
 ## 0.4.6 — 2026-11-25
 
 - **`trial`: real failures seen are a record, not a part of the bar (owner's decision 11-25).** The bar is now 1 day of history + 50 comparisons + 0 that differed (+ no ledger problem); one comparison that differed still fails it. `reds` is still counted and printed (human output: a `record` line; `--json`: top-level `reds`). **Format change:** `trial --json` `bar` no longer has a `reds` key (`{days, compared, differed, met}`); `TRIAL_REDS` is removed. Knives TR4–TR6 bite when reds rejoin the bar, when the differed condition is dropped, and when reds stop being counted.
+- **`trial` keeps its record when ledger files expire (owner's decision 11-25: the record goes on, not cleared).** Until 0.4.5 the trial was counted only from the ledger files, and a run's file is deleted after `keep_days` (30), so the counts and the first run's time fell back. Now each expired run is added to `<state>/trial/<repo>.json` before its file goes (no file goes when that record cannot be read or written), and `trial` adds the record to the ledger. Upgrading keeps every count: the ledger format did not change from 0.4.5, and the record starts empty. Nothing in the program clears the record (there is no reset command). Format in `FORMATS.md`. Knives TC1–TC4, TE1–TE3.
 
 ## 0.4.5 — 2026-11-25
 
