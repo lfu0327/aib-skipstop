@@ -723,6 +723,141 @@ fn trial_in(dir: &Path, state: &Path) -> serde_json::Value {
     })
 }
 
+/// 0.4.6 reads the ledger 0.4.5 wrote (the ledger crates did not change between them) and
+/// what was kept of expired runs: the counts and the first run's time carry on, and with real
+/// failures a record only, the bar is met with them (Andy 11-25).
+#[test]
+fn an_upgrade_keeps_the_trials_counts_and_its_first_run_and_the_bar_is_met_without_reds() {
+    use skipstop_cargo::real::{carry_json, fold, Carry, CELL_REAL};
+    use skipstop_core::ledger::{Audit, AuditCompare, How, Outcome, Plan, Stream, Unit, Writer};
+    const DAY: i64 = 86_400_000;
+    let d = std::env::temp_dir().join(format!("skipstop-upgrade-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    fs::create_dir_all(d.join("repo")).unwrap();
+    let t = Tmp(d);
+    let (repo, state) = (t.0.join("repo"), t.0.join("state"));
+    assert!(Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&repo)
+        .status()
+        .unwrap()
+        .success());
+    let (rid, unknown) = skipstop_cargo::repo::repo_id(&repo);
+    assert!(unknown.is_none(), "{unknown:?}");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let unit = |name: &str, audit: Option<AuditCompare>, result: Outcome| Unit {
+        unit: name.into(),
+        krate: Some(name.into()),
+        how: How::Ran,
+        result,
+        reuse: None,
+        why_not: None,
+        why_detail: None,
+        skip: None,
+        dur_ms: Some(1_000),
+        seat: None,
+        key: Some(format!("k-{name}")),
+        shadow: None,
+        tests_ran: Some(3),
+        failed: vec![],
+        output_digest: None,
+        audit: audit.map(|compare| Audit {
+            compare,
+            revoke: false,
+        }),
+    };
+    let run = |at: i64, units: Vec<Unit>| (at, units);
+    // what 0.4.5 left: a run 40 days ago (expired since: kept in the record) and one 2 days
+    // ago (still in the ledger), 30 + 25 audits that agreed and a real failure in each
+    let runs = [
+        run(
+            now - 40 * DAY,
+            (0..25)
+                .map(|i| unit(&format!("a{i}"), Some(AuditCompare::Same), Outcome::Pass))
+                .chain([unit("r1", None, Outcome::Fail)])
+                .collect(),
+        ),
+        run(
+            now - 2 * DAY,
+            (0..30)
+                .map(|i| unit(&format!("b{i}"), Some(AuditCompare::Same), Outcome::Pass))
+                .chain([unit("r2", None, Outcome::Fail)])
+                .collect(),
+        ),
+    ];
+    let plan = |units: &[Unit]| Plan {
+        head: "0".repeat(40),
+        tree: "t".into(),
+        host: "macos-aarch64".into(),
+        run_os: "macos".into(),
+        cells: vec![CELL_REAL.into()],
+        units: units.iter().map(|u| u.unit.clone()).collect(),
+    };
+    let mut carry = Carry::default();
+    for (i, (at, units)) in runs.iter().enumerate() {
+        let inv = format!("tr-{at}-{i}");
+        if i == 0 {
+            fold(
+                &mut carry,
+                &Stream {
+                    invocation_id: inv,
+                    seat: "local".into(),
+                    plan: plan(units),
+                    at_ms: *at,
+                    units: units.iter().map(|u| (*at, u.clone())).collect(),
+                    ended: Some(true),
+                },
+            );
+            continue;
+        }
+        let mut w = Writer::start(
+            &state.join("ledger"),
+            &rid,
+            &inv,
+            "local",
+            *at,
+            &plan(units),
+        )
+        .unwrap();
+        for u in units {
+            w.unit(*at, u).unwrap();
+        }
+        w.end(*at, true).unwrap();
+    }
+    fs::create_dir_all(state.join("trial")).unwrap();
+    fs::write(
+        state.join("trial").join(format!("{rid}.json")),
+        carry_json(&carry).to_string(),
+    )
+    .unwrap();
+
+    let tr = trial_in(&repo, &state);
+    assert_eq!(tr["compared"], 55, "{tr}");
+    assert_eq!(tr["reds"], 2, "{tr}");
+    assert_eq!(tr["runs_real"], 2, "{tr}");
+    assert_eq!(
+        tr["first_at"],
+        skipstop_ledger::envelope::rfc3339_ms(now - 40 * DAY),
+        "{tr}"
+    );
+    assert_eq!(tr["ledger_problems"], serde_json::json!([]), "{tr}");
+    assert_eq!(tr["bar"]["met"], true, "{tr}");
+    assert!(tr["bar"].get("reds").is_none(), "{tr}");
+
+    // a record that cannot be read is a ledger problem: the bar is not met, nothing is guessed
+    fs::write(state.join("trial").join(format!("{rid}.json")), "{").unwrap();
+    let tr = trial_in(&repo, &state);
+    assert_eq!(tr["bar"]["met"], false, "{tr}");
+    assert_eq!(
+        tr["ledger_problems"].as_array().map(Vec::len),
+        Some(1),
+        "{tr}"
+    );
+}
+
 fn ledger_folders(state: &Path) -> Vec<String> {
     let mut v: Vec<String> = fs::read_dir(state.join("ledger"))
         .unwrap()

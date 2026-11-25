@@ -260,8 +260,16 @@ fn tier_report(a: &Args) -> Result<String, String> {
 fn trial_report(a: &Args) -> Result<String, String> {
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let root = key::repo_root(&cwd).map_err(|e| format!("{e:?}"))?;
-    let (_, streams, problems) = repo_streams(&state_root(a).join("ledger"), &root);
-    let t = real::trial(&streams, now_ms() / 1000);
+    let state = state_root(a);
+    let (rid, streams, mut problems) = repo_streams(&state.join("ledger"), &root);
+    let carry = match read_carry(&carry_path(&state, &rid)) {
+        Ok(c) => c,
+        Err(e) => {
+            problems.push(e);
+            real::Carry::default()
+        }
+    };
+    let t = real::trial_with(&carry, &streams, now_ms() / 1000);
     let bar = t.meets_the_bar() && problems.is_empty();
     if a.json {
         return Ok(format!(
@@ -275,7 +283,7 @@ fn trial_report(a: &Args) -> Result<String, String> {
                 "revoked": t.revoked, "reds": t.reds,
                 "ledger_problems": problems,
                 "bar": {"days": real::TRIAL_DAYS, "compared": real::TRIAL_COMPARED,
-                        "reds": real::TRIAL_REDS, "differed": 0, "met": bar},
+                        "differed": 0, "met": bar},
             })
         ));
     }
@@ -290,7 +298,7 @@ fn trial_report(a: &Args) -> Result<String, String> {
     ));
     s.push_str("the bar for making real mode the default (a person's decision; nothing here changes the mode):\n");
     s.push_str(&format!(
-        "  {:<8} a week of history: {} of {} days\n",
+        "  {:<8} history: {} of {} day(s)\n",
         mark(t.days >= real::TRIAL_DAYS),
         t.days,
         real::TRIAL_DAYS
@@ -302,15 +310,13 @@ fn trial_report(a: &Args) -> Result<String, String> {
         real::TRIAL_COMPARED
     ));
     s.push_str(&format!(
-        "  {:<8} real failures seen: {} of {}\n",
-        mark(t.reds >= real::TRIAL_REDS),
-        t.reds,
-        real::TRIAL_REDS
-    ));
-    s.push_str(&format!(
         "  {:<8} comparisons that differed: {} (must be 0)\n",
         mark(t.differed == 0),
         t.differed
+    ));
+    s.push_str(&format!(
+        "  record   real failures seen: {} (kept as a record; not a part of the bar)\n",
+        t.reds
     ));
     for p in &problems {
         s.push_str(&format!("  not yet  a ledger file cannot be read: {p}\n"));
@@ -431,6 +437,139 @@ fn root_from(
         home.unwrap_or_else(|| Path::new(".")).join(".ez2-aib")
     };
     aib.join("state").join("aib-skipstop")
+}
+
+/// Where the trial's record of expired runs is kept, one file per repo id.
+fn carry_path(state: &Path, rid: &str) -> PathBuf {
+    state.join("trial").join(format!("{rid}.json"))
+}
+
+/// The kept record; no file = nothing kept yet. A file that cannot be read is an error, not
+/// an empty record: the trial is a ledger problem until it is looked at, and no ledger file
+/// expires meanwhile.
+fn read_carry(p: &Path) -> Result<real::Carry, String> {
+    match std::fs::read(p) {
+        Ok(b) => serde_json::from_slice(&b)
+            .map_err(|e| e.to_string())
+            .and_then(|v| real::carry_from_json(&v))
+            .map_err(|e| format!("{}: the trial's record cannot be read: {e}", p.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(real::Carry::default()),
+        Err(e) => Err(format!(
+            "{}: the trial's record cannot be read: {e}",
+            p.display()
+        )),
+    }
+}
+
+/// Write the record whole (a temporary file, then a rename over the old one).
+fn write_carry(p: &Path, c: &real::Carry) -> Result<(), String> {
+    let dir = p.parent().ok_or("no folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let tmp = p.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, format!("{}\n", real::carry_json(c)))
+        .map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, p).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{}: {e}", p.display())
+    })
+}
+
+/// Delete the expired runs' ledger files, each folded into the trial's record first; when
+/// the record cannot be read or written, no file is deleted. Returns how many went.
+///
+/// The ledger of a clone is shared by its working trees, so two runs can expire the same
+/// files from snapshots read at different times (f163c f215e352 M1). The whole of it runs
+/// under `trial/<repo>.lock` (made with create_new: one holder); a run that finds it held
+/// leaves expiry to the holder. Inside, a run is folded only while its file is still there:
+/// a file another run already folded and deleted is not counted again from an old snapshot.
+fn expire_ledger(state: &Path, rid: &str, old: &[&ledger::Stream]) -> usize {
+    if old.is_empty() {
+        return 0;
+    }
+    let cp = carry_path(state, rid);
+    let Some(_lock) = TrialLock::take(&cp.with_extension("lock")) else {
+        return 0;
+    };
+    let mut c = match read_carry(&cp) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("aib-skipstop: old ledger files kept: {e}");
+            return 0;
+        }
+    };
+    let file =
+        |s: &ledger::Stream| ledger::stream_path(&state.join("ledger"), rid, &s.invocation_id);
+    let mut here = Vec::new();
+    for s in old {
+        if !file(s).is_file() {
+            // gone: another run folded it and deleted it, or a person did
+            continue;
+        }
+        if !c.folded.contains(&s.invocation_id) {
+            real::fold(&mut c, s);
+            c.folded.push(s.invocation_id.clone());
+        }
+        here.push(*s);
+    }
+    if here.is_empty() {
+        return 0;
+    }
+    if let Err(e) = write_carry(&cp, &c) {
+        eprintln!("aib-skipstop: old ledger files kept: the trial's record cannot be written: {e}");
+        return 0;
+    }
+    let mut gone = 0;
+    for s in here {
+        if std::fs::remove_file(file(s)).is_ok() {
+            gone += 1;
+            c.folded.retain(|i| i != &s.invocation_id);
+        }
+    }
+    // the ids of files that went are no longer needed; if this write fails they stay, which
+    // is harmless (a folded id whose file is gone matches nothing)
+    let _ = write_carry(&cp, &c);
+    gone
+}
+
+/// The one holder of a repo's trial record while it is changed; let go when dropped.
+struct TrialLock(PathBuf);
+
+impl TrialLock {
+    /// A lock older than this was left by a run that died: taken away, and taken again once.
+    const STALE_S: u64 = 3600;
+
+    fn take(p: &Path) -> Option<TrialLock> {
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).ok()?;
+        }
+        for _ in 0..2 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(p)
+            {
+                Ok(_) => return Some(TrialLock(p.to_path_buf())),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let old = std::fs::metadata(p)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|a| a.as_secs() > Self::STALE_S);
+                    if !old || std::fs::remove_file(p).is_err() {
+                        return None;
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+}
+
+impl Drop for TrialLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// Every run of this repo in the ledger (see `skipstop_cargo::repo`), and its id. A clone
@@ -1171,14 +1310,13 @@ fn run(a: &Args) -> Result<Exit, String> {
     }
 
     // old ledger files go (never one that holds a revocation, never one that could not be
-    // read: that one is a problem to be looked at, and it is not in `streams`)
-    let mut expired_files = 0;
-    for s in real::expired(&streams, config.keep_days, now_ms() / 1000) {
-        let f = ledger::stream_path(&state.join("ledger"), &rid, &s.invocation_id);
-        if std::fs::remove_file(f).is_ok() {
-            expired_files += 1;
-        }
-    }
+    // read: that one is a problem to be looked at, and it is not in `streams`); what the
+    // trial counted of them is kept first
+    let expired_files = expire_ledger(
+        &state,
+        &rid,
+        &real::expired(&streams, config.keep_days, now_ms() / 1000),
+    );
 
     // what it says
     let would = rows.iter().filter(|r| r.would.is_some()).count();
@@ -1434,6 +1572,94 @@ mod tests {
             problems[0].contains("its ledger is not read"),
             "{problems:?}"
         );
+    }
+
+    /// An expired run's ledger file goes only after what the trial counted of it is kept,
+    /// and the trial reads the same afterwards; with a record that cannot be read, no file
+    /// goes (Andy 11-25: the record goes on).
+    #[test]
+    fn an_expired_runs_file_goes_only_after_its_counts_are_kept() {
+        use skipstop_core::ledger::Writer;
+        let d = std::env::temp_dir().join(format!("skipstop-expire-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let rid = "r-1";
+        let lr = d.join("ledger");
+        let day = 86_400_000;
+        let now = now_ms();
+        let unit = |name: &str, result: Outcome, audit: bool| Unit {
+            unit: name.into(),
+            krate: Some(name.into()),
+            how: How::Ran,
+            result,
+            reuse: None,
+            why_not: None,
+            why_detail: None,
+            skip: None,
+            dur_ms: Some(1),
+            seat: None,
+            key: Some("k".into()),
+            shadow: None,
+            tests_ran: Some(1),
+            failed: vec![],
+            output_digest: None,
+            audit: audit.then_some(Audit {
+                compare: AuditCompare::Same,
+                revoke: false,
+            }),
+        };
+        for (i, ago) in [40, 35, 2].into_iter().enumerate() {
+            let at = now - ago * day;
+            let units = [
+                unit("a", Outcome::Pass, true),
+                unit(&format!("r{i}"), Outcome::Fail, false),
+            ];
+            let plan = Plan {
+                head: "0".repeat(40),
+                tree: "t".into(),
+                host: "h".into(),
+                run_os: "macos".into(),
+                cells: vec![real::CELL_REAL.into()],
+                units: units.iter().map(|u| u.unit.clone()).collect(),
+            };
+            let mut w = Writer::start(&lr, rid, &format!("tr-{i}"), "local", at, &plan).unwrap();
+            for u in &units {
+                w.unit(at, u).unwrap();
+            }
+            w.end(at, true).unwrap();
+        }
+        let (before, p) = ledger::streams(&lr, rid);
+        assert!(p.is_empty(), "{p:?}");
+        let want = real::trial(&before, now / 1000);
+        assert_eq!((want.same, want.reds, want.runs_real), (3, 3, 3));
+        let old = real::expired(&before, 30, now / 1000);
+        assert_eq!(old.len(), 2);
+
+        // a record that cannot be read: nothing goes
+        let cp = carry_path(&d, rid);
+        std::fs::create_dir_all(cp.parent().unwrap()).unwrap();
+        std::fs::write(&cp, "{").unwrap();
+        assert_eq!(expire_ledger(&d, rid, &old), 0);
+        assert_eq!(ledger::streams(&lr, rid).0.len(), 3);
+
+        std::fs::remove_file(&cp).unwrap();
+        // another run holds the record: this one leaves expiry to it
+        let lock = cp.with_extension("lock");
+        std::fs::write(&lock, "").unwrap();
+        assert_eq!(expire_ledger(&d, rid, &old), 0);
+        assert_eq!(ledger::streams(&lr, rid).0.len(), 3);
+        std::fs::remove_file(&lock).unwrap();
+
+        assert_eq!(expire_ledger(&d, rid, &old), 2);
+        assert!(!lock.exists(), "the lock is let go");
+        // another working tree calls with the snapshot it read before these files went
+        // (f163c M1): nothing is folded twice
+        assert_eq!(expire_ledger(&d, rid, &old), 0);
+        let (after, _) = ledger::streams(&lr, rid);
+        let carry = read_carry(&cp).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(after.len(), 1);
+        assert!(carry.folded.is_empty(), "{:?}", carry.folded);
+        assert_eq!(real::trial_with(&carry, &after, now / 1000), want);
     }
 
     fn v(tests_ran: Option<u32>, failed: &[&str]) -> Verdict {

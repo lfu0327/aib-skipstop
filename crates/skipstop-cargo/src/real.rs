@@ -218,15 +218,16 @@ pub struct Trial {
     pub incomparable: u64,
     /// sources revoked
     pub revoked: u64,
-    /// units that ran and failed: failures the runs did find
+    /// units that ran and failed: failures the runs did find. Recorded and printed only; not
+    /// part of the bar (Andy 11-25: real failures caught are a record, they do not hold it back)
     pub reds: u64,
 }
 
-/// The owner's bar for trusting reuse (Andy 11-24): 24 hours (1 day) of history,
-/// fifty comparisons, three real failures seen, and not one comparison that differed.
+/// The owner's bar for trusting reuse (Andy 11-24, 11-25): 24 hours (1 day) of history,
+/// fifty comparisons, and not one comparison that differed. Real failures seen (`reds`) are
+/// counted beside it as a record, not as a part of it.
 pub const TRIAL_DAYS: i64 = 1;
 pub const TRIAL_COMPARED: u64 = 50;
-pub const TRIAL_REDS: u64 = 3;
 
 impl Trial {
     pub fn compared(&self) -> u64 {
@@ -234,74 +235,178 @@ impl Trial {
     }
     /// Every part of the bar is met. One comparison that differed fails it whatever the rest.
     pub fn meets_the_bar(&self) -> bool {
-        self.days >= TRIAL_DAYS
-            && self.compared() >= TRIAL_COMPARED
-            && self.reds >= TRIAL_REDS
-            && self.differed == 0
+        self.days >= TRIAL_DAYS && self.compared() >= TRIAL_COMPARED && self.differed == 0
     }
+}
+
+/// What the trial keeps of runs whose ledger files are gone. The record goes on: it is not
+/// cleared when a file expires, when the bar is met, when the mode changes or when the
+/// version changes (Andy 11-25); nothing in this program clears it. Each expired run is
+/// folded in before its file is deleted; `folded` names folded runs whose file may still be
+/// there, so a file that could not be deleted is not counted twice.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Carry {
+    pub t: Trial,
+    /// the failing (unit, key) set of the last run folded in, so a repeat across the line
+    /// between folded and live runs is still one red
+    pub last_fail_sig: Option<Vec<(String, Option<String>)>>,
+    pub folded: Vec<String>,
 }
 
 /// [`Trial`] from the finished runs of the ledger. A run that was killed is not counted: it
 /// is not known what it would have said.
 pub fn trial(streams: &[Stream], now_s: i64) -> Trial {
-    let mut t = Trial::default();
-    let mut last_fail_sig: Option<Vec<(String, Option<String>)>> = None;
-    for s in streams.iter().filter(|s| s.complete()) {
-        let has = |cell: &str| s.plan.cells.iter().any(|c| c == cell);
-        let real = has(CELL_REAL) || has(CELL_DEFENSE);
-        let observe = has(CELL_OBSERVE);
-        if !real && !observe {
-            continue;
-        }
-        t.first_at_ms = Some(t.first_at_ms.map_or(s.at_ms, |f| f.min(s.at_ms)));
-        if real {
-            t.runs_real += 1;
-        } else {
-            t.runs_observe += 1;
-        }
-        let mut fail_sig: Vec<(String, Option<String>)> = Vec::new();
-        for (_, u) in &s.units {
-            if u.how == How::Reused {
-                t.reused += 1;
-            }
-            let predicted_to_run =
-                u.audit.is_none() && u.shadow.as_ref().is_none_or(|sh| sh.would_reuse.is_none());
-            if predicted_to_run
-                && u.how == How::Ran
-                && u.result == skipstop_core::ledger::Outcome::Fail
-            {
-                fail_sig.push((u.unit.clone(), u.key.clone()));
-            }
-            if let Some(a) = &u.audit {
-                match a.compare {
-                    AuditCompare::Same | AuditCompare::BehaviorChanged => t.same += 1,
-                    AuditCompare::Mismatch => t.differed += 1,
-                    AuditCompare::Incomparable => t.incomparable += 1,
-                }
-                if a.revoke {
-                    t.revoked += 1;
-                }
-            } else if let Some(sh) = &u.shadow {
-                // observe mode: the unit ran, and its result is set beside its would-be source
-                match sh.same {
-                    Some(true) => t.same += 1,
-                    Some(false) => t.differed += 1,
-                    None => {}
-                }
-            }
-        }
-        fail_sig.sort();
-        if fail_sig.is_empty() {
-            last_fail_sig = None;
-        } else if last_fail_sig.as_ref() != Some(&fail_sig) {
-            t.reds += 1;
-            last_fail_sig = Some(fail_sig);
-        }
+    trial_with(&Carry::default(), streams, now_s)
+}
+
+/// [`trial`] on top of what was kept of expired runs.
+pub fn trial_with(carry: &Carry, streams: &[Stream], now_s: i64) -> Trial {
+    let mut c = carry.clone();
+    for s in streams
+        .iter()
+        .filter(|s| !carry.folded.contains(&s.invocation_id))
+    {
+        fold(&mut c, s);
     }
+    let mut t = c.t;
+    t.days = 0;
     if let Some(first) = t.first_at_ms {
         t.days = ((now_s * 1000 - first) / DAY_MS_I).max(0);
     }
     t
+}
+
+/// Add one run to `c` (a run that was killed, or another program's, adds nothing).
+pub fn fold(c: &mut Carry, s: &Stream) {
+    if !Stream::complete(s) {
+        return;
+    }
+    let t = &mut c.t;
+    let last_fail_sig = &mut c.last_fail_sig;
+    let has = |cell: &str| s.plan.cells.iter().any(|c| c == cell);
+    let real = has(CELL_REAL) || has(CELL_DEFENSE);
+    let observe = has(CELL_OBSERVE);
+    if !real && !observe {
+        return;
+    }
+    t.first_at_ms = Some(t.first_at_ms.map_or(s.at_ms, |f| f.min(s.at_ms)));
+    if real {
+        t.runs_real += 1;
+    } else {
+        t.runs_observe += 1;
+    }
+    let mut fail_sig: Vec<(String, Option<String>)> = Vec::new();
+    for (_, u) in &s.units {
+        if u.how == How::Reused {
+            t.reused += 1;
+        }
+        let predicted_to_run =
+            u.audit.is_none() && u.shadow.as_ref().is_none_or(|sh| sh.would_reuse.is_none());
+        if predicted_to_run && u.how == How::Ran && u.result == skipstop_core::ledger::Outcome::Fail
+        {
+            fail_sig.push((u.unit.clone(), u.key.clone()));
+        }
+        if let Some(a) = &u.audit {
+            match a.compare {
+                AuditCompare::Same | AuditCompare::BehaviorChanged => t.same += 1,
+                AuditCompare::Mismatch => t.differed += 1,
+                AuditCompare::Incomparable => t.incomparable += 1,
+            }
+            if a.revoke {
+                t.revoked += 1;
+            }
+        } else if let Some(sh) = &u.shadow {
+            // observe mode: the unit ran, and its result is set beside its would-be source
+            match sh.same {
+                Some(true) => t.same += 1,
+                Some(false) => t.differed += 1,
+                None => {}
+            }
+        }
+    }
+    fail_sig.sort();
+    if fail_sig.is_empty() {
+        *last_fail_sig = None;
+    } else if last_fail_sig.as_ref() != Some(&fail_sig) {
+        t.reds += 1;
+        *last_fail_sig = Some(fail_sig);
+    }
+}
+
+/// The carry as one JSON object (`v` 1), for its file.
+pub fn carry_json(c: &Carry) -> serde_json::Value {
+    let t = &c.t;
+    serde_json::json!({
+        "v": 1,
+        "first_at_ms": t.first_at_ms,
+        "runs_real": t.runs_real, "runs_observe": t.runs_observe, "reused": t.reused,
+        "same": t.same, "differed": t.differed, "incomparable": t.incomparable,
+        "revoked": t.revoked, "reds": t.reds,
+        "last_fail_sig": c.last_fail_sig,
+        "folded": c.folded,
+    })
+}
+
+/// The carry read back; anything missing or of the wrong shape is refused, never read as 0.
+pub fn carry_from_json(v: &serde_json::Value) -> Result<Carry, String> {
+    let o = v.as_object().ok_or("not an object")?;
+    if o.get("v").and_then(serde_json::Value::as_u64) != Some(1) {
+        return Err("not v 1".into());
+    }
+    let n = |k: &str| {
+        o.get(k)
+            .and_then(serde_json::Value::as_u64)
+            .ok_or(format!("bad {k}"))
+    };
+    let first_at_ms = match o.get("first_at_ms") {
+        Some(serde_json::Value::Null) => None,
+        Some(x) => Some(x.as_i64().ok_or("bad first_at_ms")?),
+        None => return Err("bad first_at_ms".into()),
+    };
+    let last_fail_sig = match o.get("last_fail_sig") {
+        Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::Array(a)) => Some(
+            a.iter()
+                .map(|p| match p.as_array().map(Vec::as_slice) {
+                    Some([serde_json::Value::String(u), serde_json::Value::String(k)]) => {
+                        Ok((u.clone(), Some(k.clone())))
+                    }
+                    Some([serde_json::Value::String(u), serde_json::Value::Null]) => {
+                        Ok((u.clone(), None))
+                    }
+                    _ => Err("bad last_fail_sig".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        _ => return Err("bad last_fail_sig".into()),
+    };
+    let folded = match o.get("folded") {
+        Some(serde_json::Value::Array(a)) => a
+            .iter()
+            .map(|x| {
+                x.as_str()
+                    .map(str::to_owned)
+                    .ok_or("bad folded".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("bad folded".into()),
+    };
+    Ok(Carry {
+        t: Trial {
+            first_at_ms,
+            days: 0,
+            runs_real: n("runs_real")?,
+            runs_observe: n("runs_observe")?,
+            reused: n("reused")?,
+            same: n("same")?,
+            differed: n("differed")?,
+            incomparable: n("incomparable")?,
+            revoked: n("revoked")?,
+            reds: n("reds")?,
+        },
+        last_fail_sig,
+        folded,
+    })
 }
 
 const DAY_MS_I: i64 = 86_400_000;
@@ -896,15 +1001,23 @@ mod tests {
         assert_eq!(t.compared(), 2);
         assert!(!t.meets_the_bar(), "two comparisons are not fifty");
 
-        // the bar: a week, fifty comparisons, three reds, none that differed
+        // the bar: a day, fifty comparisons, none that differed; no real failure needed
         let met = Trial {
             first_at_ms: Some(0),
             days: TRIAL_DAYS,
             same: TRIAL_COMPARED,
-            reds: TRIAL_REDS,
+            reds: 0,
             ..Trial::default()
         };
-        assert!(met.meets_the_bar());
+        assert!(
+            met.meets_the_bar(),
+            "reds are a record, not a part of the bar"
+        );
+        assert!(Trial {
+            reds: 7,
+            ..met.clone()
+        }
+        .meets_the_bar());
         for short in [
             Trial {
                 days: TRIAL_DAYS - 1,
@@ -912,10 +1025,6 @@ mod tests {
             },
             Trial {
                 same: TRIAL_COMPARED - 1,
-                ..met.clone()
-            },
-            Trial {
-                reds: TRIAL_REDS - 1,
                 ..met.clone()
             },
             // one reuse that would have been wrong, among a thousand that were right
@@ -962,6 +1071,47 @@ mod tests {
         let t_dedup = trial(&[multi_red.clone(), multi_red, obs_fail_stream], NOW_S);
         assert_eq!(t_dedup.reds, 1);
         assert_eq!(t_dedup.differed, 1);
+
+        // what is kept of expired runs and the runs still in the ledger add up to the same
+        // trial at every line between them, and a folded run whose file is still there is
+        // not counted twice (Andy 11-25: the record goes on, expiry does not clear it)
+        for k in 0..=st.len() {
+            let mut c = Carry::default();
+            for s in &st[..k] {
+                fold(&mut c, s);
+                c.folded.push(s.invocation_id.clone());
+            }
+            assert_eq!(trial_with(&c, &st[k..], NOW_S), trial(&st, NOW_S), "{k}");
+            assert_eq!(trial_with(&c, &st, NOW_S), trial(&st, NOW_S), "{k} twice");
+            assert_eq!(carry_from_json(&carry_json(&c)), Ok(c.clone()), "{k} json");
+        }
+        // the same failure on both sides of that line is still one red
+        let red_run = |ago: i64, id: &str| {
+            let mut s = plain(ago, vec![red.clone()]);
+            s.invocation_id = id.into();
+            s
+        };
+        let mut c = Carry::default();
+        fold(&mut c, &red_run(3 * DAY_MS, "tr-old"));
+        let c = carry_from_json(&carry_json(&c)).unwrap();
+        assert_eq!(trial_with(&c, &[red_run(DAY_MS, "tr-new")], NOW_S).reds, 1);
+        // a record that is not whole is refused, never read as 0
+        let good = carry_json(&c);
+        for k in [
+            "v",
+            "reds",
+            "same",
+            "first_at_ms",
+            "last_fail_sig",
+            "folded",
+        ] {
+            let mut bad = good.clone();
+            bad.as_object_mut().unwrap().remove(k);
+            assert!(carry_from_json(&bad).is_err(), "{k}");
+        }
+        let mut bad = good.clone();
+        bad["reds"] = serde_json::json!("1");
+        assert!(carry_from_json(&bad).is_err());
     }
 
     #[test]

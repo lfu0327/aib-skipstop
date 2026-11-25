@@ -105,9 +105,9 @@ What this repo's ledger says of the trial so far. It reads; it changes no mode.
 | `runs_real`, `runs_observe` | finished runs (a killed run is not counted) |
 | `reused` | units not run |
 | `compared`, `same`, `differed` | a real run set beside the source it was (or would have been) reused from: audits in real mode, every run in observe mode. `differed` = a reuse that would have been wrong |
-| `incomparable`, `revoked`, `reds` | audits that could not be compared; sources revoked; units that ran and failed |
+| `incomparable`, `revoked`, `reds` | audits that could not be compared; sources revoked; units that ran and failed (`reds` is a record only, not a part of the bar, since 0.4.6) |
 | `ledger_problems` | ledger files that could not be read |
-| `bar` | `{days, compared, reds, differed, met}`: the bar for making real mode the default (1 day / 24 hours, 50 comparisons, 3 real failures seen, 0 that differed, no ledger problem) and whether every part is met |
+| `bar` | `{days, compared, differed, met}`: the bar for making real mode the default (1 day / 24 hours, 50 comparisons, 0 that differed, no ledger problem) and whether every part is met. Until 0.4.5 it also had `reds` (3 real failures seen); 0.4.6 removed that key: real failures are only counted, in the top-level `reds` |
 
 ## The project's settings: `skipstop.json` at the repo's root
 
@@ -120,7 +120,7 @@ No file: the defaults. A key that is not below, a value out of range, a key writ
 | `extra_inputs` | `{"<package>": ["path", "folder/"]}`: extra repo files or folders hashed into a cargo package's key (e.g. files read via `include_str!` outside its crate folder) |
 | `defense_period_days` | 1 to 30, default 7: how often every unit runs whatever its key |
 | `units` | `{"<name>": {...}}`: units that are any command, below. A name is letters, digits, `.`, `_`, `-`, and not the name of a package |
-| `keep_days` | 8 to 3650, default 30: how long a run's ledger file is kept |
+| `keep_days` | 8 to 3650, default 30: how long a run's ledger file is kept (what the trial counted of it is kept for good in `<state>/trial/<repo>.json` first) |
 
 A unit of `units`:
 
@@ -135,6 +135,23 @@ A unit of `units`:
 
 In a run's JSON such a unit has `tests: 1`. What it prints goes to standard error. Its audit
 compares the outcome only: there are no cases to compare.
+
+## The trial's record: `<state>/trial/<repo>.json` (`"v": 1`, since 0.4.6)
+
+What `trial` counted of runs whose ledger files expired, so the trial goes on and is never
+cleared by expiry, by meeting the bar, by a mode or by a version. Before an expired file is
+deleted its run is added here, under `<state>/trial/<repo>.lock` (one holder; a lock older than an
+hour is taken as left by a run that died) and only while the file is still there, so working
+trees sharing one ledger never add a run twice; if this file cannot be read or written, no ledger file is
+deleted, and `trial` lists it under `ledger_problems` (the bar is not met). Nothing in this
+program clears it.
+
+| field | |
+|---|---|
+| `first_at_ms` | the first finished run, ms since 1970 UTC, or `null` |
+| `runs_real`, `runs_observe`, `reused`, `same`, `differed`, `incomparable`, `revoked`, `reds` | the same counts as `trial --json`, of the runs kept here |
+| `last_fail_sig` | `[[unit, key or null], …]` of the last run kept, or `null`: the same failure on both sides of the line is one red. A file that holds a revocation never expires, so it is counted after runs already kept that were newer than it: the red count (a record only) can differ by one from counting every run in time order |
+| `folded` | runs kept here whose file may still be there (a delete that failed): not counted twice |
 
 ## The events book: `<state>/events/<YYYY-MM>.jsonl`
 
